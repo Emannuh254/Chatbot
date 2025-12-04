@@ -6,27 +6,21 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon server.js"
   },
-  "keywords": [
-    "ai",
-    "chat",
-    "openai",
-    "chatbot",
-    "nuel"
-  ],
+  "keywords": ["ai", "chat", "gpt", "nuel"],
   "author": "Emmanuel Mutugi",
   "license": "MIT",
   "dependencies": {
-    "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
-    "express": "^4.18.2",
-    "openai": "^4.28.0"
+    "express": "4.18.2",
+    "cors": "2.8.5",
+    "dotenv": "16.3.1",
+    "sqlite3": "5.1.6",
+    "bcrypt": "5.1.0",
+    "jsonwebtoken": "9.0.2",
+    "node-fetch": "2.7.0"
   },
-  "devDependencies": {},
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=9.0.0"
+    "node": ">=18.0.0"
   }
 }

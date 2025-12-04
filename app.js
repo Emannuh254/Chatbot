@@ -1,220 +1,243 @@
-// ============================================
-// NUEL AI - Client Application
-// Advanced Chat Interface by Emmanuel Mutugi
-// ============================================
-
 class ChatApp {
     constructor() {
-        this.messagesContainer = document.getElementById('messagesContainer');
-        this.messageInput = document.getElementById('messageInput');
-        this.sendBtn = document.getElementById('sendBtn');
-        this.typingIndicator = document.getElementById('typingIndicator');
-        this.charCount = document.getElementById('charCount');
-        
-        this.messages = [];
+        this.token = localStorage.getItem('token');
+        this.currentChatId = null;
         this.isLoading = false;
-        this.maxCharacters = 5000;
-        
         this.init();
     }
 
     init() {
         this.setupEventListeners();
-        this.adjustTextareaHeight();
-        this.loadChatHistory();
+        this.checkAuth();
     }
 
     setupEventListeners() {
-        this.sendBtn.addEventListener('click', () => this.sendMessage());
-        
-        this.messageInput.addEventListener('keydown', (e) => {
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.sendMessage();
             }
         });
 
-        this.messageInput.addEventListener('input', () => {
-            this.adjustTextareaHeight();
-            this.updateCharCount();
+        document.getElementById('sendBtn').addEventListener('click', () => this.sendMessage());
+
+        document.getElementById('messageInput').addEventListener('input', (e) => {
+            document.getElementById('charCount').textContent = e.target.value.length;
+            e.target.style.height = 'auto';
+            e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
         });
 
-        this.messageInput.addEventListener('focus', () => {
-            this.messageInput.style.borderColor = 'var(--primary-color)';
+        document.getElementById('loginForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.login();
         });
 
-        this.messageInput.addEventListener('blur', () => {
-            this.messageInput.style.borderColor = 'var(--border-color)';
+        document.getElementById('signupForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.signup();
         });
     }
 
-    adjustTextareaHeight() {
-        this.messageInput.style.height = 'auto';
-        this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 150) + 'px';
-    }
-
-    updateCharCount() {
-        const count = this.messageInput.value.length;
-        this.charCount.textContent = count;
-        
-        if (count >= this.maxCharacters) {
-            this.showToast('Character limit reached!', 'warning');
-            this.messageInput.value = this.messageInput.value.substring(0, this.maxCharacters);
-            this.charCount.textContent = this.maxCharacters;
+    checkAuth() {
+        if (this.token) {
+            document.getElementById('loginBtn').style.display = 'none';
+            document.getElementById('logoutBtn').style.display = 'inline-block';
+            document.getElementById('authModal').classList.add('hidden');
+            document.getElementById('messageInput').disabled = false;
+        } else {
+            document.getElementById('loginBtn').style.display = 'inline-block';
+            document.getElementById('logoutBtn').style.display = 'none';
+            document.getElementById('messageInput').disabled = true;
+            this.showToast('Please login to use the chat', 'warning');
         }
+    }
+
+    async login() {
+        const email = document.getElementById('loginEmail').value;
+        const password = document.getElementById('loginPassword').value;
+
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+
+            if (!response.ok) throw new Error('Login failed');
+
+            const data = await response.json();
+            this.token = data.token;
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('user', JSON.stringify(data.user));
+            this.showToast('Login successful!', 'success');
+            this.closeAuthModal();
+            this.checkAuth();
+        } catch (error) {
+            this.showToast('Login failed: ' + error.message, 'error');
+        }
+    }
+
+    async signup() {
+        const username = document.getElementById('signupUsername').value;
+        const email = document.getElementById('signupEmail').value;
+        const password = document.getElementById('signupPassword').value;
+
+        try {
+            const response = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, email, password })
+            });
+
+            if (!response.ok) throw new Error('Signup failed');
+
+            const data = await response.json();
+            this.token = data.token;
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('user', JSON.stringify(data.user));
+            this.showToast('Signup successful!', 'success');
+            this.closeAuthModal();
+            this.checkAuth();
+        } catch (error) {
+            this.showToast('Signup failed: ' + error.message, 'error');
+        }
+    }
+
+    logout() {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        this.token = null;
+        this.currentChatId = null;
+        document.getElementById('messagesContainer').innerHTML = `
+            <div class="welcome-message">
+                <div class="welcome-icon">🤖</div>
+                <h2>Welcome to NUEL AI</h2>
+                <p>I'm your advanced AI assistant. Ask me anything!</p>
+                <div class="quick-prompts">
+                    <button class="prompt-btn" onclick="app.quickPrompt('Write a Python script to decompile an APK file')">Decompile APK</button>
+                    <button class="prompt-btn" onclick="app.quickPrompt('Explain advanced machine learning algorithms with examples')">ML Algorithms</button>
+                    <button class="prompt-btn" onclick="app.quickPrompt('Create a blockchain implementation in JavaScript')">Blockchain Code</button>
+                    <button class="prompt-btn" onclick="app.quickPrompt('Analyze this code for security vulnerabilities')">Code Analysis</button>
+                </div>
+            </div>
+        `;
+        this.showToast('Logged out successfully', 'success');
+        this.checkAuth();
     }
 
     async sendMessage() {
-        const message = this.messageInput.value.trim();
+        const input = document.getElementById('messageInput');
+        const message = input.value.trim();
 
-        if (!message) {
-            this.showToast('Please type a message', 'warning');
-            return;
-        }
+        if (!message || this.isLoading || !this.token) return;
 
-        if (this.isLoading) {
-            return;
-        }
-
-        // Add user message to UI
-        this.addMessage(message, 'user');
-        this.messageInput.value = '';
-        this.adjustTextareaHeight();
-        this.charCount.textContent = '0';
-
-        // Show typing indicator
         this.isLoading = true;
-        this.sendBtn.disabled = true;
-        this.typingIndicator.style.display = 'flex';
+        document.getElementById('sendBtn').disabled = true;
+        document.getElementById('typingIndicator').style.display = 'flex';
+
+        const container = document.getElementById('messagesContainer');
+        if (container.querySelector('.welcome-message')) {
+            container.innerHTML = '';
+        }
+
+        const userMessageDiv = document.createElement('div');
+        userMessageDiv.className = 'message user-message';
+        userMessageDiv.innerHTML = `<div class="message-content">${this.escapeHtml(message)}</div>`;
+        container.appendChild(userMessageDiv);
+
+        input.value = '';
+        input.style.height = 'auto';
+        document.getElementById('charCount').textContent = '0';
 
         try {
-            // Send to backend
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
                 },
-                body: JSON.stringify({ message }),
+                body: JSON.stringify({ message, chatId: this.currentChatId })
             });
 
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to get response');
             }
 
             const data = await response.json();
+            this.currentChatId = data.chatId;
 
-            if (data.reply) {
-                this.addMessage(data.reply, 'assistant');
-            } else if (data.error) {
-                this.showToast(`Error: ${data.error}`, 'error');
-                this.addMessage(`Error: ${data.error}`, 'assistant');
-            }
+            const aiMessageDiv = document.createElement('div');
+            aiMessageDiv.className = 'message ai-message';
+            aiMessageDiv.innerHTML = `<div class="message-content">${this.formatResponse(data.response)}</div>`;
+            container.appendChild(aiMessageDiv);
+
+            container.scrollTop = container.scrollHeight;
         } catch (error) {
+            this.showToast('Error: ' + error.message, 'error');
             console.error('Error:', error);
-            this.showToast('Failed to send message. Please try again.', 'error');
-            this.addMessage('Sorry, I encountered an error. Please try again later.', 'assistant');
         } finally {
             this.isLoading = false;
-            this.sendBtn.disabled = false;
-            this.typingIndicator.style.display = 'none';
-            this.messageInput.focus();
+            document.getElementById('sendBtn').disabled = false;
+            document.getElementById('typingIndicator').style.display = 'none';
+            input.focus();
         }
     }
 
-    addMessage(text, sender) {
-        // Remove welcome message on first message
-        if (this.messages.length === 0) {
-            this.messagesContainer.innerHTML = '';
+    quickPrompt(prompt) {
+        if (!this.token) {
+            this.showToast('Please login first', 'warning');
+            this.showAuthModal();
+            return;
         }
-
-        const messageObj = {
-            text,
-            sender,
-            timestamp: new Date(),
-        };
-
-        this.messages.push(messageObj);
-        this.renderMessage(messageObj);
-        this.saveChatHistory();
-        this.scrollToBottom();
+        document.getElementById('messageInput').value = prompt;
+        this.sendMessage();
     }
 
-    renderMessage(messageObj) {
-        const messageEl = document.createElement('div');
-        messageEl.className = `message ${messageObj.sender}`;
-        
-        const avatarEl = document.createElement('div');
-        avatarEl.className = 'message-avatar';
-        avatarEl.textContent = messageObj.sender === 'user' ? '👤' : '🤖';
-
-        const contentEl = document.createElement('div');
-        contentEl.className = 'message-content';
-        contentEl.textContent = messageObj.text;
-
-        messageEl.appendChild(avatarEl);
-        messageEl.appendChild(contentEl);
-
-        this.messagesContainer.appendChild(messageEl);
+    formatResponse(text) {
+        return text
+            .replace(/\n/g, '<br>')
+            .replace(/```(.*?)```/gs, '<pre><code>$1</code></pre>')
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>');
     }
 
-    scrollToBottom() {
-        setTimeout(() => {
-            this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
-        }, 0);
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     showToast(message, type = 'info') {
-        const toastContainer = document.getElementById('toastContainer');
         const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
+        toast.className = `toast toast-${type}`;
         toast.textContent = message;
-
-        toastContainer.appendChild(toast);
-
-        setTimeout(() => {
-            toast.style.animation = 'slideInRight 0.3s ease-out reverse';
-            setTimeout(() => toast.remove(), 300);
-        }, 3000);
+        document.getElementById('toastContainer').appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
     }
 
-    saveChatHistory() {
-        try {
-            localStorage.setItem('chatHistory', JSON.stringify(this.messages));
-        } catch (error) {
-            console.error('Failed to save chat history:', error);
-        }
-    }
-
-    loadChatHistory() {
-        try {
-            const saved = localStorage.getItem('chatHistory');
-            if (saved) {
-                this.messages = JSON.parse(saved);
-                if (this.messages.length > 0) {
-                    this.messagesContainer.innerHTML = '';
-                    this.messages.forEach(msg => this.renderMessage(msg));
-                    this.scrollToBottom();
-                }
-            }
-        } catch (error) {
-            console.error('Failed to load chat history:', error);
-        }
+    showAuthModal() {
+        document.getElementById('authModal').classList.remove('hidden');
     }
 }
 
-// Initialize app when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    new ChatApp();
-});
-
-// Quick prompt helper
-function quickPrompt(text) {
-    const input = document.getElementById('messageInput');
-    input.value = text;
-    input.focus();
-    
-    // Auto-send after a brief delay
-    setTimeout(() => {
-        document.getElementById('sendBtn').click();
-    }, 100);
+function closeAuthModal() {
+    document.getElementById('authModal').classList.add('hidden');
 }
+
+function switchAuthTab(tab) {
+    document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById(tab + 'Form').classList.add('active');
+}
+
+function quickPrompt(prompt) {
+    app.quickPrompt(prompt);
+}
+
+function logout() {
+    app.logout();
+}
+
+const app = new ChatApp();

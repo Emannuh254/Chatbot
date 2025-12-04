@@ -10,6 +10,35 @@
     <!-- Animated background -->
     <div class="background-animation"></div>
     
+    <!-- Auth Modal -->
+    <div id="authModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>NUEL AI Authentication</h2>
+                <button class="modal-close" onclick="closeAuthModal()">✕</button>
+            </div>
+            <div class="auth-tabs">
+                <button class="auth-tab active" onclick="switchAuthTab('login')">Login</button>
+                <button class="auth-tab" onclick="switchAuthTab('signup')">Sign Up</button>
+            </div>
+            
+            <!-- Login Form -->
+            <form id="loginForm" class="auth-form active">
+                <input type="email" placeholder="Email" id="loginEmail" required>
+                <input type="password" placeholder="Password" id="loginPassword" required>
+                <button type="submit" class="auth-button">Login</button>
+            </form>
+
+            <!-- Signup Form -->
+            <form id="signupForm" class="auth-form">
+                <input type="text" placeholder="Username" id="signupUsername" required>
+                <input type="email" placeholder="Email" id="signupEmail" required>
+                <input type="password" placeholder="Password" id="signupPassword" required>
+                <button type="submit" class="auth-button">Sign Up</button>
+            </form>
+        </div>
+    </div>
+
     <!-- Main container -->
     <div class="container">
         <!-- Header -->
@@ -24,7 +53,9 @@
                 </div>
                 <div class="header-stats">
                     <span class="status-indicator">● Online</span>
-                    <span class="model-info">GPT-4 Powered</span>
+                    <span class="model-info">GPT-3.5 Powered</span>
+                    <button class="logout-btn" id="logoutBtn" style="display: none;" onclick="logout()">Logout</button>
+                    <button class="login-btn" id="loginBtn" onclick="showAuthModal()">Login</button>
                 </div>
             </div>
         </div>
@@ -38,9 +69,10 @@
                     <h2>Welcome to NUEL AI</h2>
                     <p>I'm your advanced AI assistant. Ask me anything!</p>
                     <div class="quick-prompts">
-                        <button class="prompt-btn" onclick="quickPrompt('What is artificial intelligence?')">What is AI?</button>
-                        <button class="prompt-btn" onclick="quickPrompt('Explain quantum computing')">Quantum Computing</button>
-                        <button class="prompt-btn" onclick="quickPrompt('Write a short poem')">Write a Poem</button>
+                        <button class="prompt-btn" onclick="quickPrompt('Write a Python script to decompile an APK file')">Decompile APK</button>
+                        <button class="prompt-btn" onclick="quickPrompt('Explain advanced machine learning algorithms with examples')">ML Algorithms</button>
+                        <button class="prompt-btn" onclick="quickPrompt('Create a blockchain implementation in JavaScript')">Blockchain Code</button>
+                        <button class="prompt-btn" onclick="quickPrompt('Analyze this code for security vulnerabilities')">Code Analysis</button>
                     </div>
                 </div>
             </div>

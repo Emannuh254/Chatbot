@@ -1,209 +1,279 @@
-// ============================================
-// NUEL AI - Backend Server
-// Advanced Chat API by Emmanuel Mutugi
-// ============================================
-
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import OpenAI from 'openai';
+import { execSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { exec } from 'child_process';
-import os from 'os';
+import sqlite3 from 'sqlite3';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import fetch from 'node-fetch';
 
-// Load environment variables
 dotenv.config();
 
-// Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
-// ============================================
-// MIDDLEWARE SETUP
-// ============================================
-
-// Enable CORS
-app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
-    credentials: true,
-    methods: ['GET', 'POST', 'OPTIONS'],
-}));
-
-// Body parser middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Serve static files from public directory
-app.use(express.static(__dirname));
-
-// ============================================
-// INITIALIZE AI CLIENTS
-// ============================================
-
-// Initialize OpenAI/Groq client
-let aiClient = null;
-
-try {
-    const apiKey = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
-    const baseURL = process.env.GROQ_API_KEY ? 'https://api.groq.com/openai/v1' : undefined;
-    
-    aiClient = new OpenAI({
-        apiKey,
-        baseURL,
-    });
-    
-    console.log('✓ AI Client initialized successfully');
-} catch (error) {
-    console.warn('⚠ AI Client initialization warning:', error.message);
-}
-
-// ============================================
-// FUNCTION TO KILL PORT PROCESS
-// ============================================
-
-function killPort(port) {
-    return new Promise((resolve) => {
-        let command;
-        
-        if (os.platform() === "win32") {
-            // Windows: Use PowerShell
-            command = `powershell -Command "Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"`;
+// Kill port 3000 on startup
+const killPort = () => {
+    try {
+        if (process.platform === 'win32') {
+            execSync('powershell -Command "Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"', { stdio: 'ignore' });
         } else {
-            // Linux/Mac: Use lsof and kill
-            command = `lsof -ti:${port} | xargs kill -9 2>/dev/null || true`;
+            execSync('lsof -ti:3000 | xargs kill -9 2>/dev/null || true', { stdio: 'ignore' });
         }
-        
-        exec(command, { shell: os.platform() === "win32" ? "powershell" : "/bin/bash" }, (error) => {
-            if (!error) {
-                console.log(`✓ Cleared port ${port}`);
-            }
-            resolve();
-        });
+        console.log('✓ Port 3000 cleared');
+    } catch (error) {
+        console.log('✓ Port 3000 was already free');
+    }
+};
+
+killPort();
+
+// Database setup
+const db = new sqlite3.Database('./data.db', (err) => {
+    if (err) console.error('Database error:', err);
+    else console.log('✓ Database connected');
+});
+
+// Create tables
+db.serialize(() => {
+    db.run(`
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    db.run(`
+        CREATE TABLE IF NOT EXISTS chats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            title TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    `);
+
+    db.run(`
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(chat_id) REFERENCES chats(id)
+        )
+    `);
+});
+
+// Middleware
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+// Auth middleware
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) return res.status(401).json({ error: 'No token provided' });
+
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) return res.status(403).json({ error: 'Invalid token' });
+        req.user = user;
+        next();
     });
-}
+};
 
-// ============================================
-// API ENDPOINTS
-// ============================================
+// Routes
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-    res.json({
-        status: 'OK',
-        service: 'NUEL AI',
-        timestamp: new Date().toISOString(),
+// Register
+app.post('/api/auth/register', (req, res) => {
+    const { username, email, password } = req.body;
+
+    if (!username || !email || !password) {
+        return res.status(400).json({ error: 'All fields required' });
+    }
+
+    const hashedPassword = bcrypt.hashSync(password, 10);
+
+    db.run(
+        'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
+        [username, email, hashedPassword],
+        function (err) {
+            if (err) {
+                return res.status(400).json({ error: 'User already exists' });
+            }
+            const token = jwt.sign({ id: this.lastID, username, email }, JWT_SECRET, { expiresIn: '7d' });
+            res.json({ token, user: { id: this.lastID, username, email } });
+        }
+    );
+});
+
+// Login
+app.post('/api/auth/login', (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password required' });
+    }
+
+    db.get('SELECT * FROM users WHERE email = ?', [email], (err, user) => {
+        if (err || !user) {
+            return res.status(400).json({ error: 'User not found' });
+        }
+
+        if (!bcrypt.compareSync(password, user.password)) {
+            return res.status(400).json({ error: 'Invalid password' });
+        }
+
+        const token = jwt.sign({ id: user.id, username: user.username, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+        res.json({ token, user: { id: user.id, username: user.username, email: user.email } });
     });
 });
 
 // Chat endpoint
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', authenticateToken, async (req, res) => {
     try {
-        const { message } = req.body;
+        const { message, chatId } = req.body;
 
         if (!message) {
-            return res.status(400).json({ error: 'Message is required' });
+            return res.status(400).json({ error: 'Message required' });
         }
 
-        if (!aiClient) {
-            return res.status(503).json({ 
-                error: 'AI service is not configured',
-                details: 'Please set GROQ_API_KEY or OPENAI_API_KEY in environment'
-            });
+        if (!OPENAI_API_KEY) {
+            return res.status(500).json({ error: 'OpenAI API key not configured' });
         }
 
-        // Call AI API
-        const completion = await aiClient.chat.completions.create({
-            messages: [{ role: 'user', content: message }],
-            model: process.env.GROQ_API_KEY ? 'llama-3.1-8b-instant' : 'gpt-4o-mini',
-            temperature: 0.7,
-            max_tokens: 1024,
+        // Get or create chat
+        let currentChatId = chatId;
+        if (!chatId) {
+            db.run(
+                'INSERT INTO chats (user_id, title) VALUES (?, ?)',
+                [req.user.id, message.substring(0, 50)],
+                function (err) {
+                    if (err) console.error('Chat creation error:', err);
+                    currentChatId = this.lastID;
+                }
+            );
+        }
+
+        // Save user message
+        db.run(
+            'INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)',
+            [currentChatId, 'user', message]
+        );
+
+        // Call OpenAI API
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${OPENAI_API_KEY}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-3.5-turbo',
+                messages: [{ role: 'user', content: message }],
+                temperature: 0.7,
+                max_tokens: 2000
+            })
         });
 
-        const reply = completion.choices[0]?.message?.content || 'No response generated';
+        if (!response.ok) {
+            const error = await response.json();
+            return res.status(response.status).json({ error: error.error.message });
+        }
 
-        res.json({
-            success: true,
-            reply,
-            model: process.env.GROQ_API_KEY ? 'Groq (Llama 3.1)' : 'OpenAI GPT-4',
-        });
+        const data = await response.json();
+        const aiMessage = data.choices[0].message.content;
 
+        // Save AI response
+        db.run(
+            'INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)',
+            [currentChatId, 'assistant', aiMessage]
+        );
+
+        res.json({ response: aiMessage, chatId: currentChatId });
     } catch (error) {
-        console.error('Chat Error:', error.message);
-        res.status(500).json({
-            error: 'Failed to process chat',
-            details: error.message,
-        });
+        console.error('Chat error:', error);
+        res.status(500).json({ error: 'Failed to process message', details: error.message });
     }
 });
 
-// Fallback route - serve index.html
+// Get user chats
+app.get('/api/chats', authenticateToken, (req, res) => {
+    db.all(
+        'SELECT * FROM chats WHERE user_id = ? ORDER BY created_at DESC',
+        [req.user.id],
+        (err, chats) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json(chats);
+        }
+    );
+});
+
+// Get chat messages
+app.get('/api/chats/:chatId', authenticateToken, (req, res) => {
+    db.all(
+        'SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at ASC',
+        [req.params.chatId],
+        (err, messages) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json(messages);
+        }
+    );
+});
+
+// Serve static files AFTER API routes
+app.use(express.static(path.join(__dirname, '.')));
+
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // 404 handler
 app.use((req, res) => {
-    res.status(404).json({
-        error: 'Not Found',
-        path: req.path,
-    });
+    res.status(404).json({ error: 'Route not found' });
 });
 
 // Error handler
 app.use((err, req, res, next) => {
-    console.error('Server Error:', err);
-    res.status(500).json({
-        error: 'Internal Server Error',
-        message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
-    });
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error', message: err.message });
 });
 
-// ============================================
-// START SERVER
-// ============================================
-
-async function startServer() {
-    try {
-        // Kill any existing process on the port
-        await killPort(PORT);
-
-        // Start listening
-        app.listen(PORT, () => {
-            console.log('\n');
-            console.log('╔════════════════════════════════════════╗');
-            console.log('║         🤖 NUEL AI SERVER 🤖          ║');
-            console.log('╠════════════════════════════════════════╣');
-            console.log(`║ Server running on port ${PORT.toString().padEnd(27)} ║`);
-            console.log(`║ URL: http://localhost:${PORT}${' '.repeat(20 - PORT.toString().length)} ║`);
-            console.log('║ Author: Emmanuel Mutugi               ║');
-            console.log('║ Status: ✓ Online                      ║');
-            console.log('╚════════════════════════════════════════╝');
-            console.log('\n');
-        });
-
-    } catch (error) {
-        console.error('Failed to start server:', error);
-        process.exit(1);
-    }
-}
-
-// Start the server
-startServer();
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('\n⚠ SIGTERM received, shutting down gracefully...');
-    process.exit(0);
+app.listen(PORT, () => {
+    console.log(`
+╔══════════════════════════════════════╗
+║     🚀 NUEL AI Server Running 🚀      ║
+║        Powered by Emmanuel            ║
+╚══════════════════════════════════════╝
+Port: ${PORT}
+Database: Connected ✓
+OpenAI API: ${OPENAI_API_KEY ? 'Connected ✓' : 'Not configured ⚠'}
+URL: http://localhost:${PORT}
+    `);
+    setTimeout(() => {
+        console.log('Opening browser...');
+        if (process.platform === 'win32') {
+            execSync(`start http://localhost:${PORT}`, { stdio: 'ignore' });
+        } else if (process.platform === 'darwin') {
+            execSync(`open http://localhost:${PORT}`, { stdio: 'ignore' });
+        } else {
+            execSync(`xdg-open http://localhost:${PORT}`, { stdio: 'ignore' });
+        }
+    }, 1000);
 });
 
-process.on('SIGINT', () => {
-    console.log('\n⚠ SIGINT received, shutting down gracefully...');
-    process.exit(0);
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err);
 });
-
-export default app;
