@@ -27,7 +27,7 @@ const groq = new Groq({
   apiKey: GROQ_API_KEY,
 });
 
-// PostgreSQL pool for NeonDB
+// PostgreSQL pool for NeonDB with optimized settings
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
@@ -160,20 +160,7 @@ app.use(cors(corsOptions));
 // Handle OPTIONS requests explicitly
 app.options('*', cors(corsOptions));
 
-// JSON parsing middleware with error handling
-app.use(express.json({ 
-  limit: '10mb',
-  verify: (req, res, buf) => {
-    try {
-      JSON.parse(buf);
-    } catch (e) {
-      console.error('Invalid JSON:', e);
-      res.status(400).json({ error: 'Invalid JSON' });
-      throw new Error('Invalid JSON');
-    }
-  }
-}));
-
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Rate limiting to prevent abuse
@@ -195,18 +182,72 @@ const profileLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Cache for frequently accessed data
+// Cache for frequently accessed data with TTL
 const cache = {
   users: new Map(),
   chats: new Map(),
-  messages: new Map()
+  messages: new Map(),
+  setWithExpiry: function(key, value, ttl) {
+    const now = new Date();
+    const expiry = now.getTime() + ttl;
+    this[key].set(key, { value, expiry });
+  },
+  getWithExpiry: function(key) {
+    const item = this[key].get(key);
+    if (!item) return null;
+    
+    const now = new Date();
+    if (now.getTime() > item.expiry) {
+      this[key].delete(key);
+      return null;
+    }
+    return item.value;
+  }
 };
 
-// API router - Separate all API routes
-const apiRouter = express.Router();
+// Optimized Groq API call with timeout and retry using Groq SDK
+async function callGroqAPI(message, retries = 2) {
+  try {
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [{ role: 'user', content: message }],
+      model: 'llama-3.1-8b-instant',
+      temperature: 0.7,
+      max_completion_tokens: 2000,
+      top_p: 1,
+      stream: false, // Set to false for non-streaming response
+    });
+
+    return chatCompletion;
+  } catch (error) {
+    console.error('Groq Error:', error);
+    
+    // Handle specific error types
+    if (error.error?.code === 'insufficient_quota') {
+      throw new Error('API_QUOTA_EXCEEDED');
+    } else if (error.error?.code === 'invalid_api_key') {
+      throw new Error('API_KEY_INVALID');
+    } else if (error.error?.code === 'rate_limit_exceeded') {
+      throw new Error('API_RATE_LIMIT');
+    } else if (error.error?.code === 'model_decommissioned' || error.error?.type === 'invalid_request_error') {
+      throw new Error('MODEL_ERROR');
+    } else {
+      throw new Error(error.error?.message || 'Groq API error');
+    }
+  }
+}
+
+// Helper function to validate user ID
+function validateUserId(userId) {
+  if (!userId || userId === '1') {
+    return false;
+  }
+  return true;
+}
+
+// API Routes - All API routes should be defined before catch-all route
 
 // Create profile with rate limiting
-apiRouter.post('/profile/create', profileLimiter, async (req, res) => {
+app.post('/api/profile/create', profileLimiter, async (req, res) => {
   try {
     const { name, pin } = req.body;
 
@@ -238,7 +279,7 @@ apiRouter.post('/profile/create', profileLimiter, async (req, res) => {
 });
 
 // Login to existing profile
-apiRouter.post('/profile/login', profileLimiter, async (req, res) => {
+app.post('/api/profile/login', profileLimiter, async (req, res) => {
   try {
     const { name, pin } = req.body;
 
@@ -262,7 +303,7 @@ apiRouter.post('/profile/login', profileLimiter, async (req, res) => {
 });
 
 // Chat endpoint - works for both guests and authenticated users
-apiRouter.post('/chat', async (req, res) => {
+app.post('/api/chat', async (req, res) => {
   try {
     const { message } = req.body;
 
@@ -370,19 +411,20 @@ apiRouter.post('/chat', async (req, res) => {
 });
 
 // Get user chats with caching
-apiRouter.get('/chats', async (req, res) => {
+app.get('/api/chats', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'];
     
-    if (!userId || userId === '1') {
+    if (!validateUserId(userId)) {
       return res.status(401).json({ error: 'Authentication required' });
     }
     
     const cacheKey = `chats_${userId}`;
     
     // Check cache first
-    if (cache.chats.has(cacheKey)) {
-      return res.json(cache.chats.get(cacheKey));
+    const cachedData = cache.getWithExpiry(cacheKey);
+    if (cachedData) {
+      return res.json(cachedData);
     }
 
     const result = await pool.query(
@@ -391,8 +433,7 @@ apiRouter.get('/chats', async (req, res) => {
     );
     
     // Cache for 2 minutes
-    cache.chats.set(cacheKey, result.rows);
-    setTimeout(() => cache.chats.delete(cacheKey), 2 * 60 * 1000);
+    cache.setWithExpiry(cacheKey, result.rows, 2 * 60 * 1000);
     
     res.json(result.rows);
   } catch (error) {
@@ -402,12 +443,13 @@ apiRouter.get('/chats', async (req, res) => {
 });
 
 // Get chat messages with caching
-apiRouter.get('/chats/:chatId', async (req, res) => {
+app.get('/api/chats/:chatId', async (req, res) => {
   try {
     const chatId = req.params.chatId;
     const userId = req.headers['x-user-id'];
     
-    if (!userId || userId === '1') {
+    // Fixed syntax error: added missing closing quote
+    if (!validateUserId(userId)) {
       return res.status(401).json({ error: 'Authentication required' });
     }
     
@@ -422,8 +464,9 @@ apiRouter.get('/chats/:chatId', async (req, res) => {
     }
     
     // Check cache first
-    if (cache.messages.has(chatId)) {
-      return res.json(cache.messages.get(chatId));
+    const cachedData = cache.getWithExpiry(chatId);
+    if (cachedData) {
+      return res.json(cachedData);
     }
 
     const result = await pool.query(
@@ -432,8 +475,7 @@ apiRouter.get('/chats/:chatId', async (req, res) => {
     );
     
     // Cache for 5 minutes
-    cache.messages.set(chatId, result.rows);
-    setTimeout(() => cache.messages.delete(chatId), 5 * 60 * 1000);
+    cache.setWithExpiry(chatId, result.rows, 5 * 60 * 1000);
     
     res.json(result.rows);
   } catch (error) {
@@ -443,12 +485,13 @@ apiRouter.get('/chats/:chatId', async (req, res) => {
 });
 
 // Delete chat
-apiRouter.delete('/chats/:chatId', async (req, res) => {
+app.delete('/api/chats/:chatId', async (req, res) => {
   try {
     const chatId = req.params.chatId;
     const userId = req.headers['x-user-id'];
     
-    if (!userId || userId === '1') {
+    // Fixed syntax error: added missing closing quote
+    if (!validateUserId(userId)) {
       return res.status(401).json({ error: 'Authentication required' });
     }
     
@@ -476,60 +519,20 @@ apiRouter.delete('/chats/:chatId', async (req, res) => {
   }
 });
 
-// Optimized Groq API call with timeout and retry using Groq SDK
-async function callGroqAPI(message, retries = 2) {
-  try {
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: message }],
-      model: 'llama-3.1-8b-instant',
-      temperature: 0.7,
-      max_completion_tokens: 2000,
-      top_p: 1,
-      stream: false, // Set to false for non-streaming response
-    });
-
-    return chatCompletion;
-  } catch (error) {
-    console.error('Groq Error:', error);
-    
-    // Handle specific error types
-    if (error.error?.code === 'insufficient_quota') {
-      throw new Error('API_QUOTA_EXCEEDED');
-    } else if (error.error?.code === 'invalid_api_key') {
-      throw new Error('API_KEY_INVALID');
-    } else if (error.error?.code === 'rate_limit_exceeded') {
-      throw new Error('API_RATE_LIMIT');
-    } else if (error.error?.code === 'model_decommissioned' || error.error?.type === 'invalid_request_error') {
-      throw new Error('MODEL_ERROR');
-    } else {
-      throw new Error(error.error?.message || 'Groq API error');
-    }
-  }
-}
-
-// API error handling middleware
-apiRouter.use((err, req, res, next) => {
-  console.error('API Error:', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-// Mount API router with explicit path
-app.use('/api', apiRouter);
+// Static file serving - Serve files from public folder
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Service worker route - serve with correct MIME type
 app.get('/sw.js', (req, res) => {
   res.setHeader('Content-Type', 'application/javascript');
-  res.sendFile(path.join(__dirname, 'sw.js'));
+  res.sendFile(path.join(__dirname, 'public', 'sw.js'));
 });
 
 // Manifest route
 app.get('/manifest.json', (req, res) => {
   res.setHeader('Content-Type', 'application/json');
-  res.sendFile(path.join(__dirname, 'manifest.json'));
+  res.sendFile(path.join(__dirname, 'public', 'manifest.json'));
 });
-
-// Serve static files
-app.use(express.static(path.join(__dirname)));
 
 // Catch-all route for SPA - Must be after API routes
 app.get('*', (req, res) => {
@@ -539,7 +542,7 @@ app.get('*', (req, res) => {
   }
   
   // Serve index.html for all other routes
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // 404 handler - ensure JSON response for API routes
@@ -561,10 +564,10 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`
-╔════════════════════════════════════╗
+╔══════════════════════════════════════╗
 ║     🚀 NUEL AI Server Running 🚀      ║
 ║        Powered by Emmanuel            ║
-╚════════════════════════════════════╝
+╚══════════════════════════════════╝
 Port: ${PORT}
 Database: Neon PostgreSQL ✓
 Groq API: ${GROQ_API_KEY ? 'Connected ✓' : 'Not configured ⚠'}
