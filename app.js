@@ -12,7 +12,13 @@ class ChatApp {
                 autoSave: localStorage.getItem('autoSave') !== 'false',
                 soundEnabled: localStorage.getItem('soundEnabled') === 'true',
                 fontSize: localStorage.getItem('fontSize') || 'medium'
-            }
+            },
+            // Mobile-specific state
+            isMobile: this.detectMobile(),
+            isOnline: navigator.onLine,
+            sidebarOpen: false,
+            keyboardHeight: 0,
+            virtualKeyboardVisible: false
         };
 
         // Cache DOM elements
@@ -32,16 +38,33 @@ class ChatApp {
             newChatBtn: null,
             chatHistory: null,
             sidebar: null,
-            sidebarToggle: null
+            sidebarToggle: null,
+            // Mobile-specific elements
+            touchArea: null,
+            mobileInputBar: null
         };
 
         // Debounce timers
         this.timers = {
             typing: null,
-            autoSave: null
+            autoSave: null,
+            resize: null
+        };
+
+        // Performance monitoring
+        this.performance = {
+            lastFrameTime: 0,
+            frameCount: 0,
+            fps: 0
         };
 
         this.init();
+    }
+
+    // Mobile detection
+    detectMobile() {
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+               (window.innerWidth <= 768 && 'ontouchstart' in window);
     }
 
     init() {
@@ -51,6 +74,8 @@ class ChatApp {
         this.applyTheme();
         this.applyFontSize();
         this.initializeKeyboardShortcuts();
+        this.setupMobileOptimizations();
+        this.initializePerformanceMonitoring();
         
         // Make app globally available
         window.app = this;
@@ -74,6 +99,10 @@ class ChatApp {
         this.elements.chatHistory = document.getElementById('chatHistory');
         this.elements.sidebar = document.getElementById('chatSidebar');
         this.elements.sidebarToggle = document.getElementById('sidebarToggle');
+        
+        // Mobile-specific elements
+        this.elements.touchArea = document.querySelector('.chat-area');
+        this.elements.mobileInputBar = document.querySelector('.input-bar');
     }
 
     setupEventListeners() {
@@ -94,10 +123,18 @@ class ChatApp {
 
             this.elements.messageInput.addEventListener('focus', () => {
                 this.elements.messageInput.parentElement.classList.add('focused');
+                // Mobile-specific: adjust viewport when keyboard appears
+                if (this.state.isMobile) {
+                    this.handleKeyboardShow();
+                }
             });
 
             this.elements.messageInput.addEventListener('blur', () => {
                 this.elements.messageInput.parentElement.classList.remove('focused');
+                // Mobile-specific: adjust viewport when keyboard disappears
+                if (this.state.isMobile) {
+                    this.handleKeyboardHide();
+                }
             });
         }
 
@@ -172,6 +209,253 @@ class ChatApp {
 
         // Initialize chat history listeners
         this.attachChatHistoryListeners();
+    }
+
+    setupMobileOptimizations() {
+        if (!this.state.isMobile) return;
+        
+        // Add touch events for mobile
+        this.setupTouchEvents();
+        
+        // Optimize for mobile viewport
+        this.optimizeMobileViewport();
+        
+        // Handle orientation changes
+        window.addEventListener('orientationchange', () => {
+            this.handleOrientationChange();
+        });
+        
+        // Handle online/offline status
+        window.addEventListener('online', () => {
+            this.state.isOnline = true;
+            this.showToast('Connection restored', 'success');
+        });
+        
+        window.addEventListener('offline', () => {
+            this.state.isOnline = false;
+            this.showToast('Connection lost', 'warning');
+        });
+    }
+
+    setupTouchEvents() {
+        if (!this.state.isMobile) return;
+        
+        // Add swipe gestures for mobile
+        let touchStartX = 0;
+        let touchStartY = 0;
+        
+        this.elements.messagesContainer.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }, { passive: true });
+        
+        this.elements.messagesContainer.addEventListener('touchend', (e) => {
+            const touchEndX = e.changedTouches[0].clientX;
+            const touchEndY = e.changedTouches[0].clientY;
+            const deltaX = touchEndX - touchStartX;
+            const deltaY = touchEndY - touchStartY;
+            
+            // Swipe right to show sidebar
+            if (Math.abs(deltaX) > Math.abs(deltaY) && deltaX > 50) {
+                this.toggleSidebar();
+            }
+        }, { passive: true });
+        
+        // Add pull-to-refresh for mobile
+        let startY = 0;
+        let isPulling = false;
+        
+        this.elements.messagesContainer.addEventListener('touchstart', (e) => {
+            if (this.elements.messagesContainer.scrollTop <= 0) {
+                startY = e.touches[0].clientY;
+                isPulling = false;
+            }
+        }, { passive: true });
+        
+        this.elements.messagesContainer.addEventListener('touchmove', (e) => {
+            if (this.elements.messagesContainer.scrollTop <= 0) {
+                const currentY = e.touches[0].clientY;
+                if (currentY - startY > 100) {
+                    isPulling = true;
+                    this.showPullToRefreshIndicator();
+                } else {
+                    isPulling = false;
+                    this.hidePullToRefreshIndicator();
+                }
+            }
+        }, { passive: true });
+        
+        this.elements.messagesContainer.addEventListener('touchend', () => {
+            if (isPulling) {
+                this.refreshChatHistory();
+                this.hidePullToRefreshIndicator();
+            }
+            isPulling = false;
+        }, { passive: true });
+    }
+
+    optimizeMobileViewport() {
+        if (!this.state.isMobile) return;
+        
+        // Set proper viewport height for mobile
+        const updateViewportHeight = () => {
+            const isKeyboardVisible = window.innerHeight < window.screen.height * 0.75;
+            this.state.virtualKeyboardVisible = isKeyboardVisible;
+            
+            // Adjust chat area height based on keyboard visibility
+            if (this.elements.chatArea) {
+                if (isKeyboardVisible) {
+                    this.elements.chatArea.style.height = `${window.innerHeight - this.elements.mobileInputBar.offsetHeight}px`;
+                } else {
+                    this.elements.chatArea.style.height = '100%';
+                }
+            }
+        };
+        
+        // Initial call
+        updateViewportHeight();
+        
+        // Listen for resize and orientation changes
+        window.addEventListener('resize', () => {
+            clearTimeout(this.timers.resize);
+            this.timers.resize = setTimeout(updateViewportHeight, 100);
+        });
+        
+        // Listen for visual viewport API for better keyboard detection
+        if ('visualViewport' in window) {
+            window.visualViewport.addEventListener('resize', updateViewportHeight);
+        }
+    }
+
+    handleKeyboardShow() {
+        if (!this.state.isMobile) return;
+        
+        // Add a small delay to ensure keyboard is fully visible
+        setTimeout(() => {
+            const isKeyboardVisible = window.innerHeight < window.screen.height * 0.75;
+            if (isKeyboardVisible !== this.state.virtualKeyboardVisible) {
+                this.state.virtualKeyboardVisible = isKeyboardVisible;
+                this.optimizeMobileViewport();
+            }
+        }, 300);
+    }
+
+    handleKeyboardHide() {
+        if (!this.state.isMobile) return;
+        
+        // Add a small delay to ensure keyboard is fully hidden
+        setTimeout(() => {
+            const isKeyboardVisible = window.innerHeight < window.screen.height * 0.75;
+            if (isKeyboardVisible !== this.state.virtualKeyboardVisible) {
+                this.state.virtualKeyboardVisible = isKeyboardVisible;
+                this.optimizeMobileViewport();
+            }
+        }, 100);
+    }
+
+    handleOrientationChange() {
+        if (!this.state.isMobile) return;
+        
+        // Re-optimize viewport after orientation change
+        setTimeout(() => {
+            this.optimizeMobileViewport();
+        }, 300);
+    }
+
+    showPullToRefreshIndicator() {
+        if (!this.state.isMobile) return;
+        
+        // Create or update pull-to-refresh indicator
+        let indicator = document.getElementById('pullToRefreshIndicator');
+        if (!indicator) {
+            indicator = document.createElement('div');
+            indicator.id = 'pullToRefreshIndicator';
+            indicator.className = 'pull-to-refresh-indicator';
+            indicator.innerHTML = '<span>↻ Pull to refresh</span>';
+            indicator.style.cssText = `
+                position: fixed;
+                top: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                background-color: rgba(0, 0, 0, 0.7);
+                color: white;
+                padding: 10px 20px;
+                border-radius: 20px;
+                font-weight: bold;
+                z-index: 1000;
+                transition: transform 0.3s ease;
+                opacity: 0;
+            `;
+            document.body.appendChild(indicator);
+        }
+        
+        // Show the indicator
+        setTimeout(() => {
+            indicator.style.opacity = '1';
+            indicator.style.transform = 'translateX(-50%) translateY(10px)';
+        }, 10);
+    }
+
+    hidePullToRefreshIndicator() {
+        const indicator = document.getElementById('pullToRefreshIndicator');
+        if (indicator) {
+            indicator.style.opacity = '0';
+            setTimeout(() => {
+                indicator.style.transform = 'translateX(-50%) translateY(-20px)';
+                setTimeout(() => {
+                    document.body.removeChild(indicator);
+                }, 300);
+            }, 200);
+        }
+    }
+
+    refreshChatHistory() {
+        if (!this.state.user || !this.state.user.id) return;
+        
+        // Show loading indicator
+        this.showToast('Refreshing chat history...', 'info');
+        
+        // Reload chat history
+        this.loadChatHistory();
+    }
+
+    initializePerformanceMonitoring() {
+        // Monitor FPS for performance optimization
+        const checkFPS = () => {
+            const now = performance.now();
+            const delta = now - this.performance.lastFrameTime;
+            this.performance.lastFrameTime = now;
+            this.performance.frameCount++;
+            
+            if (this.performance.frameCount % 30 === 0) {
+                this.performance.fps = Math.round(1000 / delta);
+                console.log(`FPS: ${this.performance.fps}`);
+                
+                // Adjust quality based on performance
+                if (this.performance.fps < 30) {
+                    this.reduceAnimationsForPerformance();
+                } else if (this.performance.fps > 50) {
+                    this.restoreAnimations();
+                }
+            }
+        };
+        
+        const animate = () => {
+            checkFPS();
+            requestAnimationFrame(animate);
+        };
+        
+        requestAnimationFrame(animate);
+    }
+
+    reduceAnimationsForPerformance() {
+        // Reduce animations on low-end devices
+        document.body.classList.add('reduce-animations');
+    }
+
+    restoreAnimations() {
+        // Restore normal animations
+        document.body.classList.remove('reduce-animations');
     }
 
     initializeKeyboardShortcuts() {
@@ -286,16 +570,17 @@ class ChatApp {
 
         try {
             this.showLoadingState(true);
-            const response = await fetch('/api/profile/create', {
+            const response = await this.apiRequest('/api/profile/create', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, pin })
             });
 
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Profile creation failed');
+            }
+
             const data = await response.json();
-
-            if (!response.ok) throw new Error(data.error);
-
             this.state.user = data.user;
             localStorage.setItem('user', JSON.stringify(data.user));
             this.showToast('Profile created successfully! 🎉', 'success');
@@ -353,13 +638,16 @@ class ChatApp {
         if (!this.state.user || !this.state.user.id) return;
         
         try {
-            const response = await fetch('/api/chats', {
+            const response = await this.apiRequest('/api/chats', {
                 headers: {
                     'X-User-ID': this.state.user.id
                 }
             });
             
-            if (!response.ok) throw new Error('Failed to load chat history');
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to load chat history');
+            }
             
             const chats = await response.json();
             this.renderChatHistory(chats);
@@ -404,13 +692,16 @@ class ChatApp {
         if (!this.state.user || !this.state.user.id) return;
         
         try {
-            const response = await fetch(`/api/chats/${chatId}`, {
+            const response = await this.apiRequest(`/api/chats/${chatId}`, {
                 headers: {
                     'X-User-ID': this.state.user.id
                 }
             });
             
-            if (!response.ok) throw new Error('Failed to load chat');
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to load chat');
+            }
             
             const messages = await response.json();
             this.state.currentChatId = chatId;
@@ -454,7 +745,7 @@ class ChatApp {
         });
         
         // Scroll to bottom
-        this.elements.messagesContainer.scrollTop = this.elements.messagesContainer.scrollHeight;
+        this.scrollToBottom();
     }
 
     startNewChat() {
@@ -470,7 +761,17 @@ class ChatApp {
 
     toggleSidebar() {
         if (this.elements.sidebar) {
+            this.state.sidebarOpen = !this.state.sidebarOpen;
             this.elements.sidebar.classList.toggle('collapsed');
+            
+            // Adjust chat area width based on sidebar state
+            if (this.state.isMobile) {
+                if (this.state.sidebarOpen) {
+                    this.elements.chatArea.style.width = 'calc(100% - 250px)';
+                } else {
+                    this.elements.chatArea.style.width = '100%';
+                }
+            }
         }
     }
 
@@ -484,6 +785,12 @@ class ChatApp {
 
         if (this.state.isLoading) {
             return; // Prevent multiple simultaneous requests
+        }
+
+        // Check network status
+        if (!this.state.isOnline) {
+            this.showToast('You appear to be offline. Please check your connection.', 'error');
+            return;
         }
 
         this.state.isLoading = true;
@@ -517,31 +824,35 @@ class ChatApp {
                 headers['X-User-ID'] = this.state.user.id;
             }
 
-            const response = await fetch('/api/chat', {
+            const response = await this.apiRequest('/api/chat', {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify({ message })
             });
 
             if (!response.ok) {
-                const error = await response.json();
+                const errorData = await response.json();
                 
                 // Handle specific Groq errors
-                if (error.error === 'API_QUOTA_EXCEEDED') {
-                    this.showToast(error.message, 'error');
-                    this.addMessage(error.fallbackResponse, 'assistant', true);
+                if (errorData.error === 'API_QUOTA_EXCEEDED') {
+                    this.showToast(errorData.message, 'error');
+                    this.addMessage(errorData.fallbackResponse, 'assistant', true);
                     return;
-                } else if (error.error === 'API_KEY_INVALID') {
-                    this.showToast(error.message, 'error');
-                    this.addMessage(error.fallbackResponse, 'assistant', true);
+                } else if (errorData.error === 'API_KEY_INVALID') {
+                    this.showToast(errorData.message, 'error');
+                    this.addMessage(errorData.fallbackResponse, 'assistant', true);
                     return;
-                } else if (error.error === 'API_RATE_LIMIT') {
-                    this.showToast(error.message, 'warning');
-                    this.addMessage(error.fallbackResponse, 'assistant', true);
+                } else if (errorData.error === 'API_RATE_LIMIT') {
+                    this.showToast(errorData.message, 'warning');
+                    this.addMessage(errorData.fallbackResponse, 'assistant', true);
+                    return;
+                } else if (errorData.error === 'MODEL_ERROR') {
+                    this.showToast(errorData.message, 'error');
+                    this.addMessage(errorData.fallbackResponse, 'assistant', true);
                     return;
                 }
                 
-                throw new Error(error.error || 'Failed to get response');
+                throw new Error(errorData.error || 'Failed to get response');
             }
 
             const data = await response.json();
@@ -571,6 +882,49 @@ class ChatApp {
             this.elements.sendBtn.disabled = false;
             this.elements.typingIndicator.style.display = 'none';
             this.elements.messageInput.focus();
+        }
+    }
+
+    // Helper function for API requests with better error handling
+    async apiRequest(url, options = {}) {
+        // Default options
+        const defaultOptions = {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+        };
+        
+        // Merge with provided options
+        const requestOptions = {
+            ...defaultOptions,
+            ...options,
+            headers: {
+                ...defaultOptions.headers,
+                ...options.headers
+            }
+        };
+        
+        try {
+            const response = await fetch(url, requestOptions);
+            
+            // Check if response is JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                // If not JSON, create a more informative error
+                const text = await response.text();
+                console.error(`Expected JSON but got ${contentType || 'unknown content type'}. Response:`, text);
+                throw new Error('Server returned non-JSON response. Please try again.');
+            }
+            
+            return response;
+        } catch (error) {
+            // Re-throw with more context
+            if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+                throw new Error('Network error. Please check your connection and try again.');
+            }
+            throw error;
         }
     }
 
@@ -624,7 +978,10 @@ class ChatApp {
     }
 
     scrollToBottom() {
-        this.elements.messagesContainer.scrollTop = this.elements.messagesContainer.scrollHeight;
+        // Smooth scroll to bottom with performance optimization
+        if (this.elements.messagesContainer) {
+            this.elements.messagesContainer.scrollTop = this.elements.messagesContainer.scrollHeight;
+        }
     }
 
     async copyMessage(messageId) {

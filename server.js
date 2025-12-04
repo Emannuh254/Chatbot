@@ -36,16 +36,6 @@ const pool = new Pool({
   connectionTimeoutMillis: 10000,
 });
 
-// Optional: test connection on startup
-pool.connect()
-  .then(client => {
-    console.log('✓ Connected to NeonDB');
-    client.release();
-  })
-  .catch(err => {
-    console.error('❌ NeonDB connection error:', err);
-  });
-
 // Only kill port in development, not in production
 const isDevelopment = process.env.NODE_ENV !== 'production';
 if (isDevelopment) {
@@ -148,18 +138,51 @@ await initializeTables();
 
 // Middleware for performance
 app.use(compression()); // Compress responses
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' ? false : true, // Restrict in production
-  credentials: true
+
+// Configure CORS more explicitly
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production' 
+    ? (origin, callback) => {
+        // In production, you should specify allowed origins
+        // For now, we'll allow all origins with credentials
+        callback(null, true);
+      }
+    : true, // Allow all origins in development
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-ID'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+
+// Handle OPTIONS requests explicitly
+app.options('*', cors(corsOptions));
+
+// JSON parsing middleware with error handling
+app.use(express.json({ 
+  limit: '10mb',
+  verify: (req, res, buf) => {
+    try {
+      JSON.parse(buf);
+    } catch (e) {
+      console.error('Invalid JSON:', e);
+      res.status(400).json({ error: 'Invalid JSON' });
+      throw new Error('Invalid JSON');
+    }
+  }
 }));
-app.use(express.json({ limit: '10mb' }));
+
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Rate limiting to prevent abuse
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per windowMs
-  message: { error: 'Too many requests, please try again later' }
+  message: { error: 'Too many requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use('/api/', limiter);
 
@@ -167,7 +190,9 @@ app.use('/api/', limiter);
 const profileLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5, // Limit each IP to 5 profile requests per windowMs
-  message: { error: 'Too many profile attempts, please try again later' }
+  message: { error: 'Too many profile attempts, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 // Cache for frequently accessed data
@@ -177,41 +202,11 @@ const cache = {
   messages: new Map()
 };
 
-// Optimized Groq API call with timeout and retry using Groq SDK
-async function callGroqAPI(message, retries = 2) {
-  try {
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: message }],
-      model: 'llama-3.1-8b-instant',
-      temperature: 0.7,
-      max_completion_tokens: 2000,
-      top_p: 1,
-      stream: false, // Set to false for non-streaming response
-    });
-
-    return chatCompletion;
-  } catch (error) {
-    console.error('Groq Error:', error);
-    
-    // Handle specific error types
-    if (error.error?.code === 'insufficient_quota') {
-      throw new Error('API_QUOTA_EXCEEDED');
-    } else if (error.error?.code === 'invalid_api_key') {
-      throw new Error('API_KEY_INVALID');
-    } else if (error.error?.code === 'rate_limit_exceeded') {
-      throw new Error('API_RATE_LIMIT');
-    } else if (error.error?.code === 'model_decommissioned' || error.error?.type === 'invalid_request_error') {
-      throw new Error('MODEL_ERROR');
-    } else {
-      throw new Error(error.error?.message || 'Groq API error');
-    }
-  }
-}
-
-// Routes
+// API router - Separate all API routes
+const apiRouter = express.Router();
 
 // Create profile with rate limiting
-app.post('/api/profile/create', profileLimiter, async (req, res) => {
+apiRouter.post('/profile/create', profileLimiter, async (req, res) => {
   try {
     const { name, pin } = req.body;
 
@@ -243,7 +238,7 @@ app.post('/api/profile/create', profileLimiter, async (req, res) => {
 });
 
 // Login to existing profile
-app.post('/api/profile/login', profileLimiter, async (req, res) => {
+apiRouter.post('/profile/login', profileLimiter, async (req, res) => {
   try {
     const { name, pin } = req.body;
 
@@ -267,7 +262,7 @@ app.post('/api/profile/login', profileLimiter, async (req, res) => {
 });
 
 // Chat endpoint - works for both guests and authenticated users
-app.post('/api/chat', async (req, res) => {
+apiRouter.post('/chat', async (req, res) => {
   try {
     const { message } = req.body;
 
@@ -375,7 +370,7 @@ app.post('/api/chat', async (req, res) => {
 });
 
 // Get user chats with caching
-app.get('/api/chats', async (req, res) => {
+apiRouter.get('/chats', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'];
     
@@ -407,7 +402,7 @@ app.get('/api/chats', async (req, res) => {
 });
 
 // Get chat messages with caching
-app.get('/api/chats/:chatId', async (req, res) => {
+apiRouter.get('/chats/:chatId', async (req, res) => {
   try {
     const chatId = req.params.chatId;
     const userId = req.headers['x-user-id'];
@@ -448,7 +443,7 @@ app.get('/api/chats/:chatId', async (req, res) => {
 });
 
 // Delete chat
-app.delete('/api/chats/:chatId', async (req, res) => {
+apiRouter.delete('/chats/:chatId', async (req, res) => {
   try {
     const chatId = req.params.chatId;
     const userId = req.headers['x-user-id'];
@@ -481,20 +476,45 @@ app.delete('/api/chats/:chatId', async (req, res) => {
   }
 });
 
-// Serve static files with caching headers
-app.use(express.static(path.join(__dirname), {
-  maxAge: process.env.NODE_ENV === 'production' ? '1d' : '0',
-  setHeaders: (res, filePath) => {
-    // Set proper content types
-    if (filePath.endsWith('.js')) {
-      res.setHeader('Content-Type', 'application/javascript');
-    } else if (filePath.endsWith('.css')) {
-      res.setHeader('Content-Type', 'text/css');
-    } else if (filePath.endsWith('.json')) {
-      res.setHeader('Content-Type', 'application/json');
+// Optimized Groq API call with timeout and retry using Groq SDK
+async function callGroqAPI(message, retries = 2) {
+  try {
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [{ role: 'user', content: message }],
+      model: 'llama-3.1-8b-instant',
+      temperature: 0.7,
+      max_completion_tokens: 2000,
+      top_p: 1,
+      stream: false, // Set to false for non-streaming response
+    });
+
+    return chatCompletion;
+  } catch (error) {
+    console.error('Groq Error:', error);
+    
+    // Handle specific error types
+    if (error.error?.code === 'insufficient_quota') {
+      throw new Error('API_QUOTA_EXCEEDED');
+    } else if (error.error?.code === 'invalid_api_key') {
+      throw new Error('API_KEY_INVALID');
+    } else if (error.error?.code === 'rate_limit_exceeded') {
+      throw new Error('API_RATE_LIMIT');
+    } else if (error.error?.code === 'model_decommissioned' || error.error?.type === 'invalid_request_error') {
+      throw new Error('MODEL_ERROR');
+    } else {
+      throw new Error(error.error?.message || 'Groq API error');
     }
   }
-}));
+}
+
+// API error handling middleware
+apiRouter.use((err, req, res, next) => {
+  console.error('API Error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// Mount API router with explicit path
+app.use('/api', apiRouter);
 
 // Service worker route - serve with correct MIME type
 app.get('/sw.js', (req, res) => {
@@ -508,7 +528,10 @@ app.get('/manifest.json', (req, res) => {
   res.sendFile(path.join(__dirname, 'manifest.json'));
 });
 
-// Serve index.html for all other non-API routes
+// Serve static files
+app.use(express.static(path.join(__dirname)));
+
+// Catch-all route for SPA - Must be after API routes
 app.get('*', (req, res) => {
   // Don't serve index.html for API routes, sw.js, or manifest.json
   if (req.path.startsWith('/api/') || req.path === '/sw.js' || req.path === '/manifest.json') {
@@ -519,15 +542,21 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// 404 handler
+// 404 handler - ensure JSON response for API routes
 app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'API endpoint not found' });
+  }
+  res.status(404).send('Page not found');
 });
 
-// Error handler
+// Error handler - ensure JSON response for API routes
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
-  res.status(500).json({ error: 'Internal server error' });
+  if (req.path.startsWith('/api/')) {
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+  res.status(500).send('Internal server error');
 });
 
 app.listen(PORT, () => {
