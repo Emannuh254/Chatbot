@@ -215,8 +215,9 @@ class ChatApp {
         const input = document.getElementById('messageInput');
         const message = input.value.trim();
 
-        if (!message || this.isLoading || !this.token) {
-            if (!this.token) this.showToast('Please login first', 'warning');
+        // Allow sending messages without authentication
+        if (!message) {
+            this.showToast('Message cannot be empty', 'warning');
             return;
         }
 
@@ -244,9 +245,9 @@ class ChatApp {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.token}`
+                    'Authorization': this.token ? `Bearer ${this.token}` : undefined // Include token if available
                 },
-                body: JSON.stringify({ message, chatId: this.currentChatId })
+                body: JSON.stringify({ message })
             });
 
             if (!response.ok) {
@@ -255,14 +256,17 @@ class ChatApp {
             }
 
             const data = await response.json();
-            this.currentChatId = data.chatId;
-
             const aiMessageDiv = document.createElement('div');
             aiMessageDiv.className = 'message ai-message';
             aiMessageDiv.innerHTML = `<div class="message-content">${this.formatResponse(data.response)}</div>`;
             container.appendChild(aiMessageDiv);
 
             container.scrollTop = container.scrollHeight;
+
+            // Prompt user to log in if not authenticated
+            if (!this.token) {
+                this.showToast('Log in to save your chat history!', 'info');
+            }
         } catch (error) {
             this.showToast('Error: ' + error.message, 'error');
             console.error('Error:', error);
@@ -319,3 +323,25 @@ class ChatApp {
 
 // Initialize app when DOM is ready
 const app = new ChatApp();
+
+document.addEventListener("DOMContentLoaded", function() {
+    const lazyImages = document.querySelectorAll('img.lazy');
+
+    const lazyLoad = (image) => {
+        image.src = image.dataset.src;
+        image.classList.remove('lazy');
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                lazyLoad(entry.target);
+                observer.unobserve(entry.target);
+            }
+        });
+    });
+
+    lazyImages.forEach(image => {
+        observer.observe(image);
+    });
+});
