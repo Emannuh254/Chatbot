@@ -1,0 +1,32 @@
+{
+  "name": "nuel-ai-chatbot",
+  "version": "1.0.0",
+  "description": "NUEL AI - Advanced Chat Application by Emmanuel Mutugi",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ai",
+    "chat",
+    "openai",
+    "chatbot",
+    "nuel"
+  ],
+  "author": "Emmanuel Mutugi",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "openai": "^4.28.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NUEL AI - Advanced Chat by Mannuh</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Animated background -->
+    <div class="background-animation"></div>
+    
+    <!-- Main container -->
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-content">
+                <div class="logo-section">
+                    <div class="logo-icon">⚡</div>
+                    <div class="logo-text">
+                        <h1>NUEL AI</h1>
+                        <p class="tagline">Advanced Intelligence by Mannuh</p>
+                    </div>
+                </div>
+                <div class="header-stats">
+                    <span class="status-indicator">● Online</span>
+                    <span class="model-info">GPT-4 Powered</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat container -->
+        <div class="chat-wrapper">
+            <!-- Messages area -->
+            <div class="messages-container" id="messagesContainer">
+                <div class="welcome-message">
+                    <div class="welcome-icon">🤖</div>
+                    <h2>Welcome to NUEL AI</h2>
+                    <p>I'm your advanced AI assistant. Ask me anything!</p>
+                    <div class="quick-prompts">
+                        <button class="prompt-btn" onclick="quickPrompt('What is artificial intelligence?')">What is AI?</button>
+                        <button class="prompt-btn" onclick="quickPrompt('Explain quantum computing')">Quantum Computing</button>
+                        <button class="prompt-btn" onclick="quickPrompt('Write a short poem')">Write a Poem</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input area -->
+            <div class="input-container">
+                <div class="input-wrapper">
+                    <textarea 
+                        id="messageInput" 
+                        class="message-input" 
+                        placeholder="Type your message here... (Shift+Enter for new line, Enter to send)"
+                        rows="1"
+                    ></textarea>
+                    <button class="send-button" id="sendBtn" title="Send message (Enter)">
+                        <span class="send-icon">➤</span>
+                    </button>
+                </div>
+                <div class="input-footer">
+                    <span class="char-count"><span id="charCount">0</span>/5000</span>
+                    <span class="typing-indicator" id="typingIndicator" style="display: none;">
+                        <span></span><span></span><span></span>
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>© 2025 NUEL AI by Emmanuel Mutugi • <a href="#" class="footer-link">Privacy</a> • <a href="#" class="footer-link">Terms</a></p>
+        </div>
+    </div>
+
+    <!-- Toast notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
