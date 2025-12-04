@@ -5,37 +5,36 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NUEL AI - Advanced Chat by Mannuh</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
 </head>
 <body>
     <!-- Animated background -->
     <div class="background-animation"></div>
     
-    <!-- Auth Modal -->
-    <div id="authModal" class="modal hidden">
+    <!-- Profile Modal -->
+    <div id="profileModal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>NUEL AI Authentication</h2>
-                <button class="modal-close" onclick="closeAuthModal()">✕</button>
+                <h2>Create Your Profile</h2>
+                <button class="modal-close" onclick="closeProfileModal()">✕</button>
             </div>
-            <div class="auth-tabs">
-                <button class="auth-tab active" onclick="switchAuthTab('login')">Login</button>
-                <button class="auth-tab" onclick="switchAuthTab('signup')">Sign Up</button>
+            <div class="profile-form-container">
+                <p class="profile-intro">You're currently using the guest account. Create a profile to save your chat history!</p>
+                <form id="profileForm" class="profile-form">
+                    <div class="form-group">
+                        <label for="profileName">Display Name</label>
+                        <input type="text" id="profileName" placeholder="Choose a name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="profilePin">PIN (4 digits)</label>
+                        <input type="password" id="profilePin" placeholder="Create a 4-digit PIN" maxlength="4" pattern="[0-9]{4}" required>
+                    </div>
+                    <button type="submit" class="profile-button">Create Profile</button>
+                </form>
+                <div class="profile-alternative">
+                    <button class="guest-button" onclick="continueAsGuest()">Continue as Guest</button>
+                </div>
             </div>
-            
-            <!-- Login Form -->
-            <form id="loginForm" class="auth-form active">
-                <input type="email" placeholder="Email" id="loginEmail" required>
-                <input type="password" placeholder="Password" id="loginPassword" required>
-                <button type="submit" class="auth-button">Login</button>
-            </form>
-
-            <!-- Signup Form -->
-            <form id="signupForm" class="auth-form">
-                <input type="text" placeholder="Username" id="signupUsername" required>
-                <input type="email" placeholder="Email" id="signupEmail" required>
-                <input type="password" placeholder="Password" id="signupPassword" required>
-                <button type="submit" class="auth-button">Sign Up</button>
-            </form>
         </div>
     </div>
 
@@ -54,8 +53,10 @@
                 <div class="header-stats">
                     <span class="status-indicator">● Online</span>
                     <span class="model-info">GPT-3.5 Powered</span>
-                    <button class="logout-btn" id="logoutBtn" style="display: none;">Logout</button>
-                    <button class="login-btn" id="loginBtn">Login</button>
+                    <div class="user-info" id="userInfo">
+                        <span id="userStatus">Guest</span>
+                        <button class="profile-btn" id="profileBtn">Create Profile</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -69,10 +70,10 @@
                     <h2>Welcome to NUEL AI</h2>
                     <p>I'm your advanced AI assistant. Ask me anything!</p>
                     <div class="quick-prompts">
-                        <button type="button" class="prompt-btn">Decompile APK</button>
-                        <button type="button" class="prompt-btn">ML Algorithms</button>
-                        <button type="button" class="prompt-btn">Blockchain Code</button>
-                        <button type="button" class="prompt-btn">Code Analysis</button>
+                        <button type="button" class="prompt-btn" data-prompt="Write a Python script to decompile an APK file">Decompile APK</button>
+                        <button type="button" class="prompt-btn" data-prompt="Explain advanced machine learning algorithms with examples">ML Algorithms</button>
+                        <button type="button" class="prompt-btn" data-prompt="Create a blockchain implementation in JavaScript">Blockchain Code</button>
+                        <button type="button" class="prompt-btn" data-prompt="Analyze this code for security vulnerabilities">Code Analysis</button>
                     </div>
                 </div>
             </div>
@@ -85,7 +86,6 @@
                         class="message-input" 
                         placeholder="Type your message here... (Shift+Enter for new line, Enter to send)"
                         rows="1"
-                        disabled
                     ></textarea>
                     <button class="send-button" id="sendBtn" type="button" title="Send message (Enter)">
                         <span class="send-icon">➤</span>
@@ -114,37 +114,16 @@
         // Global function stubs - will be replaced by app.js
         let app = null;
 
-        function showAuthModal() {
-            if (app) app.showAuthModal();
+        function showProfileModal() {
+            if (app) app.showProfileModal();
         }
 
-        function closeAuthModal() {
-            if (app) app.closeAuthModal();
+        function closeProfileModal() {
+            if (app) app.closeProfileModal();
         }
 
-        function switchAuthTab(tab) {
-            const loginForm = document.getElementById('loginForm');
-            const signupForm = document.getElementById('signupForm');
-            const tabs = document.querySelectorAll('.auth-tab');
-
-            tabs.forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
-            
-            if (tab === 'login') {
-                tabs[0].classList.add('active');
-                loginForm.classList.add('active');
-            } else {
-                tabs[1].classList.add('active');
-                signupForm.classList.add('active');
-            }
-        }
-
-        function quickPrompt(prompt) {
-            if (app) app.quickPrompt(prompt);
-        }
-
-        function logout() {
-            if (app) app.logout();
+        function continueAsGuest() {
+            if (app) app.continueAsGuest();
         }
     </script>
     <script src="app.js"></script>
