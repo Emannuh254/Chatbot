@@ -9,52 +9,100 @@ class ChatApp {
     init() {
         this.setupEventListeners();
         this.checkAuth();
+        // Make app globally available
+        window.app = this;
     }
 
     setupEventListeners() {
-        document.getElementById('messageInput').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const loginBtn = document.getElementById('loginBtn');
+        const logoutBtn = document.getElementById('logoutBtn');
+
+        if (messageInput) {
+            messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.sendMessage();
+                }
+            });
+
+            messageInput.addEventListener('input', (e) => {
+                document.getElementById('charCount').textContent = e.target.value.length;
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
+            });
+        }
+
+        if (sendBtn) {
+            sendBtn.addEventListener('click', () => this.sendMessage());
+        }
+
+        if (loginBtn) {
+            loginBtn.addEventListener('click', () => this.showAuthModal());
+        }
+
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => this.logout());
+        }
+
+        const loginForm = document.getElementById('loginForm');
+        if (loginForm) {
+            loginForm.addEventListener('submit', (e) => {
                 e.preventDefault();
-                this.sendMessage();
-            }
-        });
+                this.login();
+            });
+        }
 
-        document.getElementById('sendBtn').addEventListener('click', () => this.sendMessage());
+        const signupForm = document.getElementById('signupForm');
+        if (signupForm) {
+            signupForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.signup();
+            });
+        }
 
-        document.getElementById('messageInput').addEventListener('input', (e) => {
-            document.getElementById('charCount').textContent = e.target.value.length;
-            e.target.style.height = 'auto';
-            e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
-        });
+        // Quick prompt buttons
+        const promptBtns = document.querySelectorAll('.prompt-btn');
+        const prompts = [
+            'Write a Python script to decompile an APK file',
+            'Explain advanced machine learning algorithms with examples',
+            'Create a blockchain implementation in JavaScript',
+            'Analyze this code for security vulnerabilities'
+        ];
 
-        document.getElementById('loginForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.login();
-        });
-
-        document.getElementById('signupForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.signup();
+        promptBtns.forEach((btn, index) => {
+            btn.addEventListener('click', () => {
+                this.quickPrompt(prompts[index]);
+            });
         });
     }
 
     checkAuth() {
+        const loginBtn = document.getElementById('loginBtn');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const messageInput = document.getElementById('messageInput');
+
         if (this.token) {
-            document.getElementById('loginBtn').style.display = 'none';
-            document.getElementById('logoutBtn').style.display = 'inline-block';
+            loginBtn.style.display = 'none';
+            logoutBtn.style.display = 'inline-block';
             document.getElementById('authModal').classList.add('hidden');
-            document.getElementById('messageInput').disabled = false;
+            if (messageInput) messageInput.disabled = false;
         } else {
-            document.getElementById('loginBtn').style.display = 'inline-block';
-            document.getElementById('logoutBtn').style.display = 'none';
-            document.getElementById('messageInput').disabled = true;
-            this.showToast('Please login to use the chat', 'warning');
+            loginBtn.style.display = 'inline-block';
+            logoutBtn.style.display = 'none';
+            if (messageInput) messageInput.disabled = true;
         }
     }
 
     async login() {
-        const email = document.getElementById('loginEmail').value;
-        const password = document.getElementById('loginPassword').value;
+        const email = document.getElementById('loginEmail').value.trim();
+        const password = document.getElementById('loginPassword').value.trim();
+
+        if (!email || !password) {
+            this.showToast('Please fill in all fields', 'error');
+            return;
+        }
 
         try {
             const response = await fetch('/api/auth/login', {
@@ -63,24 +111,39 @@ class ChatApp {
                 body: JSON.stringify({ email, password })
             });
 
-            if (!response.ok) throw new Error('Login failed');
-
             const data = await response.json();
+
+            if (!response.ok) throw new Error(data.error);
+
             this.token = data.token;
             localStorage.setItem('token', data.token);
             localStorage.setItem('user', JSON.stringify(data.user));
-            this.showToast('Login successful!', 'success');
+            this.showToast('Login successful! 🎉', 'success');
             this.closeAuthModal();
             this.checkAuth();
+            
+            // Clear forms
+            document.getElementById('loginForm').reset();
+            document.getElementById('signupForm').reset();
         } catch (error) {
             this.showToast('Login failed: ' + error.message, 'error');
         }
     }
 
     async signup() {
-        const username = document.getElementById('signupUsername').value;
-        const email = document.getElementById('signupEmail').value;
-        const password = document.getElementById('signupPassword').value;
+        const username = document.getElementById('signupUsername').value.trim();
+        const email = document.getElementById('signupEmail').value.trim();
+        const password = document.getElementById('signupPassword').value.trim();
+
+        if (!username || !email || !password) {
+            this.showToast('Please fill in all fields', 'error');
+            return;
+        }
+
+        if (password.length < 6) {
+            this.showToast('Password must be at least 6 characters', 'error');
+            return;
+        }
 
         try {
             const response = await fetch('/api/auth/register', {
@@ -89,15 +152,20 @@ class ChatApp {
                 body: JSON.stringify({ username, email, password })
             });
 
-            if (!response.ok) throw new Error('Signup failed');
-
             const data = await response.json();
+
+            if (!response.ok) throw new Error(data.error);
+
             this.token = data.token;
             localStorage.setItem('token', data.token);
             localStorage.setItem('user', JSON.stringify(data.user));
-            this.showToast('Signup successful!', 'success');
+            this.showToast('Account created! Welcome to NUEL AI 🚀', 'success');
             this.closeAuthModal();
             this.checkAuth();
+            
+            // Clear forms
+            document.getElementById('loginForm').reset();
+            document.getElementById('signupForm').reset();
         } catch (error) {
             this.showToast('Signup failed: ' + error.message, 'error');
         }
@@ -114,22 +182,43 @@ class ChatApp {
                 <h2>Welcome to NUEL AI</h2>
                 <p>I'm your advanced AI assistant. Ask me anything!</p>
                 <div class="quick-prompts">
-                    <button class="prompt-btn" onclick="app.quickPrompt('Write a Python script to decompile an APK file')">Decompile APK</button>
-                    <button class="prompt-btn" onclick="app.quickPrompt('Explain advanced machine learning algorithms with examples')">ML Algorithms</button>
-                    <button class="prompt-btn" onclick="app.quickPrompt('Create a blockchain implementation in JavaScript')">Blockchain Code</button>
-                    <button class="prompt-btn" onclick="app.quickPrompt('Analyze this code for security vulnerabilities')">Code Analysis</button>
+                    <button type="button" class="prompt-btn">Decompile APK</button>
+                    <button type="button" class="prompt-btn">ML Algorithms</button>
+                    <button type="button" class="prompt-btn">Blockchain Code</button>
+                    <button type="button" class="prompt-btn">Code Analysis</button>
                 </div>
             </div>
         `;
         this.showToast('Logged out successfully', 'success');
         this.checkAuth();
+        // Re-attach quick prompt listeners
+        this.attachQuickPromptListeners();
+    }
+
+    attachQuickPromptListeners() {
+        const promptBtns = document.querySelectorAll('.prompt-btn');
+        const prompts = [
+            'Write a Python script to decompile an APK file',
+            'Explain advanced machine learning algorithms with examples',
+            'Create a blockchain implementation in JavaScript',
+            'Analyze this code for security vulnerabilities'
+        ];
+
+        promptBtns.forEach((btn, index) => {
+            btn.addEventListener('click', () => {
+                this.quickPrompt(prompts[index]);
+            });
+        });
     }
 
     async sendMessage() {
         const input = document.getElementById('messageInput');
         const message = input.value.trim();
 
-        if (!message || this.isLoading || !this.token) return;
+        if (!message || this.isLoading || !this.token) {
+            if (!this.token) this.showToast('Please login first', 'warning');
+            return;
+        }
 
         this.isLoading = true;
         document.getElementById('sendBtn').disabled = true;
@@ -148,6 +237,7 @@ class ChatApp {
         input.value = '';
         input.style.height = 'auto';
         document.getElementById('charCount').textContent = '0';
+        container.scrollTop = container.scrollHeight;
 
         try {
             const response = await fetch('/api/chat', {
@@ -196,6 +286,8 @@ class ChatApp {
 
     formatResponse(text) {
         return text
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
             .replace(/\n/g, '<br>')
             .replace(/```(.*?)```/gs, '<pre><code>$1</code></pre>')
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -213,31 +305,17 @@ class ChatApp {
         toast.className = `toast toast-${type}`;
         toast.textContent = message;
         document.getElementById('toastContainer').appendChild(toast);
-        setTimeout(() => toast.remove(), 3000);
+        setTimeout(() => toast.remove(), 4000);
     }
 
     showAuthModal() {
         document.getElementById('authModal').classList.remove('hidden');
     }
+
+    closeAuthModal() {
+        document.getElementById('authModal').classList.add('hidden');
+    }
 }
 
-function closeAuthModal() {
-    document.getElementById('authModal').classList.add('hidden');
-}
-
-function switchAuthTab(tab) {
-    document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
-    event.target.classList.add('active');
-    document.getElementById(tab + 'Form').classList.add('active');
-}
-
-function quickPrompt(prompt) {
-    app.quickPrompt(prompt);
-}
-
-function logout() {
-    app.logout();
-}
-
+// Initialize app when DOM is ready
 const app = new ChatApp();
