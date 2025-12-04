@@ -1,0 +1,22 @@
+{
+  "name": "NUEL AI - Advanced Chat",
+  "short_name": "NUEL AI",
+  "description": "Advanced AI chatbot by Emmanuel",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#00ff41",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width='100' height='100' rx='20' fill='%23000000'/><text y='0.9em' font-size='90' text-anchor='middle' x='50' fill='%2300ff41'>⚡</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width='100' height='100' rx='20' fill='%23000000'/><text y='0.9em' font-size='90' text-anchor='middle' x='50' fill='%2300ff41'>⚡</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

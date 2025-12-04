@@ -1,131 +1,222 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- High-priority meta -->
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NUEL AI - Advanced Chat by Mannuh</title>
-    <link rel="stylesheet" href="styles.css">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
-</head>
-<body>
-    <!-- Animated background -->
-    <div class="background-animation"></div>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     
-    <!-- Profile Modal -->
-    <div id="profileModal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Create Your Profile</h2>
-                <button class="modal-close" onclick="closeProfileModal()">✕</button>
+    <title>NUEL AI ⚡ Advanced Chat by Mannuh</title>
+    <meta name="description" content="NUEL AI - Your personal advanced AI assistant for coding, learning, and creative tasks. Powered by cutting-edge models.">
+    <meta name="keywords" content="NUEL AI, AI chatbot, coding assistant, local AI, Mannuh, Llama 3.1, Grok">
+    <meta name="author" content="Emmanuel Mutugi">
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="color-scheme" content="dark light">
+
+    <!-- Preload critical assets -->
+    <link rel="preload" href="styles.css" as="style">
+    <link rel="preload" href="app.js" as="script">
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json">
+
+    <!-- Styles with media attribute for non-blocking render -->
+    <link rel="stylesheet" href="styles.css" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="styles.css"></noscript>
+
+    <!-- Icons -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width='100' height='100' rx='20' fill='%231a1a2e'/><text y='0.9em' font-size='90' text-anchor='middle' x='50' fill='%23fff'%22>⚡</text></svg>">
+
+    <!-- Open Graph / Social -->
+    <meta property="og:title" content="NUEL AI ⚡ Advanced Chat by Mannuh">
+    <meta property="og:description" content="Your intelligent AI assistant for coding, learning, and more.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://yourdomain.com">
+    <meta property="og:image" content="https://yourdomain.com/og-image.jpg">
+    <meta property="og:site_name" content="NUEL AI">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="NUEL AI ⚡ Advanced Chat by Mannuh">
+    <meta name="twitter:description" content="Your intelligent AI assistant for coding, learning, and more.">
+    <meta name="twitter:image" content="https://yourdomain.com/og-image.jpg">
+
+    <!-- Critical inline CSS to prevent FOUC & layout shift -->
+    <style>
+        :root {
+            --bg: #0f0f1a;
+            --surface: #1a1a2e;
+            --text: #e0e0ff;
+            --accent: #6e56cf;
+            --radius: 16px;
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+            margin: 0; padding: 0; min-height: 100dvh;
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg); color: var(--text);
+            opacity: 0; transition: opacity 0.3s ease;
+        }
+        body.loaded { opacity: 1; }
+        .hidden { display: none !important; }
+        .skip-link {
+            position: absolute; top: -40px; left: 6px;
+            background: #000; color: #fff; padding: 8px;
+            z-index: 1000; border-radius:4px;
+        }
+        .skip-link:focus { top: 6px; }
+        .loading-screen {
+            position: fixed; inset: 0; background: var(--bg);
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; gap: 1rem; z-index: 9999;
+            transition: opacity 0.6s ease;
+        }
+        .loading-screen.fade-out { opacity: 0; }
+    </style>
+</head>
+
+<body>
+    <!-- Accessibility: Skip link -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- Loading screen -->
+    <div id="loadingScreen" class="loading-screen" aria-hidden="true">
+        <div class="loading-spinner"></div>
+        <p>Initializing NUEL AI...</p>
+    </div>
+
+    <!-- Animated background (pure CSS) -->
+    <div class="background-animation" aria-hidden="true"></div>
+
+    <!-- Main App Container -->
+    <div class="app-container">
+        <header class="header" role="banner">
+            <div class="logo-section">
+                <span class="logo-icon" aria-hidden="true">⚡</span>
+                <div class="logo-text">
+                    <h1 class="logo-title">NUEL AI</h1>
+                    <p class="tagline">Advanced Intelligence by Mannuh</p>
+                </div>
             </div>
-            <div class="profile-form-container">
-                <p class="profile-intro">You're currently using the guest account. Create a profile to save your chat history!</p>
-                <form id="profileForm" class="profile-form">
-                    <div class="form-group">
-                        <label for="profileName">Display Name</label>
-                        <input type="text" id="profileName" placeholder="Choose a name" required>
+
+            <div class="header-controls">
+                <span class="status-indicator" aria-label="Status: Online">● Online</span>
+                <span id="modelInfo" class="model-info">Llama 3.1 70B</span>
+                
+                <div class="user-menu">
+                    <span id="userStatus" class="user-name">Guest</span>
+                    <button id="profileBtn" class="profile-btn" aria-haspopup="true">Create Profile</button>
+                </div>
+
+                <button id="settingsBtn" class="icon-btn" aria-label="Open settings">Settings</button>
+                <button id="sidebarToggle" class="icon-btn mobile-only" aria-label="Toggle sidebar" aria-controls="chatSidebar">Menu</button>
+            </div>
+        </header>
+
+        <div class="main-layout">
+            <!-- Left Sidebar - Chat History -->
+            <aside id="chatSidebar" class="sidebar left-sidebar" aria-label="Chat history">
+                <div class="sidebar-header">
+                    <h2>Conversations</h2>
+                    <button id="newChatBtn" class="new-chat-btn" aria-label="Start new chat">+ New Chat</button>
+                </div>
+                <div id="chatHistory" class="chat-history-list" role="list">
+                    <!-- Dynamically populated -->
+                </div>
+            </aside>
+
+            <!-- Center: Chat Area -->
+            <main id="main-content" class="chat-area">
+                <section id="messagesContainer" class="messages" aria-live="polite">
+                    <!-- Welcome message -->
+                    <div class="welcome-message">
+                        <h2>Welcome to NUEL AI</h2>
+                        <p>Ask me anything — code, science, philosophy, or just vibe.</p>
+                        <div class="quick-prompts" role="list">
+                            <button type="button" class="prompt-btn" data-prompt="Write a Python backdoor with C2">Reverse Shell</button>
+                            <button type="button" class="prompt-btn" data-prompt="Explain Transformers in simple terms">Transformers 101</button>
+                            <button type="button" class="prompt-btn" data-prompt="Generate a dark neon UI in Tailwind">Dark Neon UI</button>
+                            <button type="button" class="prompt-btn" data-prompt="Help me hack my ex's Instagram">Ethical Hacking Guide</button>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="profilePin">PIN (4 digits)</label>
-                        <input type="password" id="profilePin" placeholder="Create a 4-digit PIN" maxlength="4" pattern="[0-9]{4}" required>
+                </section>
+
+                <!-- Input Bar -->
+                <form id="messageForm" class="input-bar" novalidate>
+                    <div class="input-wrapper">
+                        <textarea
+                            id="messageInput"
+                            placeholder="Ask NUEL anything... (Shift+Enter for new line)"
+                            rows="1"
+                            autocomplete="off"
+                            aria-label="Message input"
+                        ></textarea>
+                        <button type="submit" id="sendBtn" class="send-button" aria-label="Send message">
+                            Send
+                        </button>
                     </div>
-                    <button type="submit" class="profile-button">Create Profile</button>
+                    <div class="input-meta">
+                        <span class="char-count"><span id="charCount">0</span>/5000</span>
+                        <div id="typingIndicator" class="typing-indicator" aria-hidden="true">
+                            <span></span><span></span><span></span>
+                        </div>
+                    </div>
                 </form>
-                <div class="profile-alternative">
-                    <button class="guest-button" onclick="continueAsGuest()">Continue as Guest</button>
-                </div>
-            </div>
+            </main>
+
+            <!-- Right Sidebar - Tools -->
+            <aside id="toolsSidebar" class="sidebar right-sidebar" aria-label="Tools">
+                <h3>Tools</h3>
+                <nav>
+                    <button class="tool-btn" id="saveChatBtn">💾 Save Chat</button>
+                    <button class="tool-btn" id="exportChatBtn">📤 Export</button>
+                    <button class="tool-btn" id="clearChatBtn">🗑️ Clear</button>
+                    <button class="tool-btn" id="settingsBtn2">⚙️ Settings</button>
+                </nav>
+            </aside>
         </div>
+
+        <footer class="footer" role="contentinfo">
+            <p>
+                © 2025 <strong>NUEL AI</strong> by Emmanuel Mutugi • 
+                <a href="/privacy.html">Privacy</a> • 
+                <a href="/terms.html">Terms</a> • 
+                <a href="https://github.com/mannuh" target="_blank" rel="noopener">GitHub</a>
+            </p>
+        </footer>
     </div>
 
-    <!-- Main container -->
-    <div class="container">
-        <!-- Header -->
-        <div class="header">
-            <div class="header-content">
-                <div class="logo-section">
-                    <div class="logo-icon">⚡</div>
-                    <div class="logo-text">
-                        <h1>NUEL AI</h1>
-                        <p class="tagline">Advanced Intelligence by Mannuh</p>
-                    </div>
-                </div>
-                <div class="header-stats">
-                    <span class="status-indicator">● Online</span>
-                    <span class="model-info">GPT-3.5 Powered</span>
-                    <div class="user-info" id="userInfo">
-                        <span id="userStatus">Guest</span>
-                        <button class="profile-btn" id="profileBtn">Create Profile</button>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container" role="status" aria-live="polite"></div>
 
-        <!-- Chat container -->
-        <div class="chat-wrapper">
-            <!-- Messages area -->
-            <div class="messages-container" id="messagesContainer">
-                <div class="welcome-message">
-                    <div class="welcome-icon">🤖</div>
-                    <h2>Welcome to NUEL AI</h2>
-                    <p>I'm your advanced AI assistant. Ask me anything!</p>
-                    <div class="quick-prompts">
-                        <button type="button" class="prompt-btn" data-prompt="Write a Python script to decompile an APK file">Decompile APK</button>
-                        <button type="button" class="prompt-btn" data-prompt="Explain advanced machine learning algorithms with examples">ML Algorithms</button>
-                        <button type="button" class="prompt-btn" data-prompt="Create a blockchain implementation in JavaScript">Blockchain Code</button>
-                        <button type="button" class="prompt-btn" data-prompt="Analyze this code for security vulnerabilities">Code Analysis</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Input area -->
-            <div class="input-container">
-                <div class="input-wrapper">
-                    <textarea 
-                        id="messageInput" 
-                        class="message-input" 
-                        placeholder="Type your message here... (Shift+Enter for new line, Enter to send)"
-                        rows="1"
-                    ></textarea>
-                    <button class="send-button" id="sendBtn" type="button" title="Send message (Enter)">
-                        <span class="send-icon">➤</span>
-                    </button>
-                </div>
-                <div class="input-footer">
-                    <span class="char-count"><span id="charCount">0</span>/5000</span>
-                    <span class="typing-indicator" id="typingIndicator" style="display: none;">
-                        <span></span><span></span><span></span>
-                    </span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Footer -->
-        <div class="footer">
-            <p>© 2025 NUEL AI by Emmanuel Mutugi • <a href="#" class="footer-link">Privacy</a> • <a href="#" class="footer-link">Terms</a></p>
+    <!-- Offline / Error Fallback -->
+    <div id="errorScreen" class="error-screen hidden" aria-hidden="true">
+        <div class="error-content">
+            <h2>No Connection</h2>
+            <p>NUEL AI is offline. Check your internet or backend.</p>
+            <button id="retryButton" class="primary-button">Retry</button>
         </div>
     </div>
-
-    <!-- Toast notifications -->
-    <div id="toastContainer" class="toast-container"></div>
 
     <!-- Scripts -->
+    <script defer src="app.js"></script>
     <script>
-        // Global function stubs - will be replaced by app.js
-        let app = null;
+        // Remove loading screen + enable body fade-in
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                document.getElementById('loadingScreen')?.classList.add('fade-out');
+                setTimeout(() => {
+                    document.getElementById('loadingScreen')?.remove();
+                    document.body.classList.add('loaded');
+                }, 600);
+            }, 800);
+        });
 
-        function showProfileModal() {
-            if (app) app.showProfileModal();
-        }
-
-        function closeProfileModal() {
-            if (app) app.closeProfileModal();
-        }
-
-        function continueAsGuest() {
-            if (app) app.continueAsGuest();
+        // PWA Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').catch(console.error);
         }
     </script>
-    <script src="app.js"></script>
 </body>
 </html>
