@@ -4,11 +4,12 @@ import dotenv from 'dotenv';
 import { execSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import sqlite3 from 'sqlite3';
+import pkg from 'pg';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import fetch from 'node-fetch';
 
+const { Pool } = pkg;
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -35,45 +36,71 @@ const killPort = () => {
 
 killPort();
 
-// Database setup
-const db = new sqlite3.Database('./data.db', (err) => {
-    if (err) console.error('Database error:', err);
-    else console.log('✓ Database connected');
+// Database connection pool
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: {
+        rejectUnauthorized: false
+    }
 });
 
-// Create tables
-db.serialize(() => {
-    db.run(`
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-
-    db.run(`
-        CREATE TABLE IF NOT EXISTS chats (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            title TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        )
-    `);
-
-    db.run(`
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(chat_id) REFERENCES chats(id)
-        )
-    `);
+pool.on('error', (err) => {
+    console.error('❌ Unexpected error on idle client', err);
 });
+
+// Initialize database tables
+async function initializeTables() {
+    try {
+        const client = await pool.connect();
+
+        // Create users table
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(255) UNIQUE NOT NULL,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Create chats table
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS chats (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Create messages table
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS messages (
+                id SERIAL PRIMARY KEY,
+                chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+                role VARCHAR(50) NOT NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Create indexes for better performance
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_chats_user_id ON chats(user_id);
+            CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
+        `);
+
+        client.release();
+        console.log('✓ Database tables initialized');
+    } catch (error) {
+        console.error('❌ Database initialization error:', error);
+        process.exit(1);
+    }
+}
+
+// Initialize tables on startup
+await initializeTables();
 
 // Middleware
 app.use(cors());
@@ -97,48 +124,63 @@ const authenticateToken = (req, res, next) => {
 // Routes
 
 // Register
-app.post('/api/auth/register', (req, res) => {
-    const { username, email, password } = req.body;
+app.post('/api/auth/register', async (req, res) => {
+    try {
+        const { username, email, password } = req.body;
 
-    if (!username || !email || !password) {
-        return res.status(400).json({ error: 'All fields required' });
-    }
-
-    const hashedPassword = bcrypt.hashSync(password, 10);
-
-    db.run(
-        'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
-        [username, email, hashedPassword],
-        function (err) {
-            if (err) {
-                return res.status(400).json({ error: 'User already exists' });
-            }
-            const token = jwt.sign({ id: this.lastID, username, email }, JWT_SECRET, { expiresIn: '7d' });
-            res.json({ token, user: { id: this.lastID, username, email } });
+        if (!username || !email || !password) {
+            return res.status(400).json({ error: 'All fields required' });
         }
-    );
+
+        if (password.length < 6) {
+            return res.status(400).json({ error: 'Password must be at least 6 characters' });
+        }
+
+        const hashedPassword = bcrypt.hashSync(password, 10);
+
+        const result = await pool.query(
+            'INSERT INTO users (username, email, password) VALUES ($1, $2, $3) RETURNING id, username, email',
+            [username, email, hashedPassword]
+        );
+
+        const user = result.rows[0];
+        const token = jwt.sign({ id: user.id, username: user.username, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+        res.json({ token, user });
+    } catch (error) {
+        if (error.code === '23505') {
+            return res.status(400).json({ error: 'User already exists' });
+        }
+        console.error('Registration error:', error);
+        res.status(500).json({ error: 'Registration failed', details: error.message });
+    }
 });
 
 // Login
-app.post('/api/auth/login', (req, res) => {
-    const { email, password } = req.body;
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
 
-    if (!email || !password) {
-        return res.status(400).json({ error: 'Email and password required' });
-    }
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email and password required' });
+        }
 
-    db.get('SELECT * FROM users WHERE email = ?', [email], (err, user) => {
-        if (err || !user) {
-            return res.status(400).json({ error: 'User not found' });
+        const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+        const user = result.rows[0];
+
+        if (!user) {
+            return res.status(401).json({ error: 'Invalid email or password' });
         }
 
         if (!bcrypt.compareSync(password, user.password)) {
-            return res.status(400).json({ error: 'Invalid password' });
+            return res.status(401).json({ error: 'Invalid email or password' });
         }
 
         const token = jwt.sign({ id: user.id, username: user.username, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
         res.json({ token, user: { id: user.id, username: user.username, email: user.email } });
-    });
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ error: 'Login failed', details: error.message });
+    }
 });
 
 // Chat endpoint
@@ -146,7 +188,7 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     try {
         const { message, chatId } = req.body;
 
-        if (!message) {
+        if (!message || message.trim().length === 0) {
             return res.status(400).json({ error: 'Message required' });
         }
 
@@ -154,22 +196,20 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
             return res.status(500).json({ error: 'OpenAI API key not configured' });
         }
 
-        // Get or create chat
         let currentChatId = chatId;
+
+        // Create chat if needed
         if (!chatId) {
-            db.run(
-                'INSERT INTO chats (user_id, title) VALUES (?, ?)',
-                [req.user.id, message.substring(0, 50)],
-                function (err) {
-                    if (err) console.error('Chat creation error:', err);
-                    currentChatId = this.lastID;
-                }
+            const chatResult = await pool.query(
+                'INSERT INTO chats (user_id, title) VALUES ($1, $2) RETURNING id',
+                [req.user.id, message.substring(0, 50) + '...']
             );
+            currentChatId = chatResult.rows[0].id;
         }
 
         // Save user message
-        db.run(
-            'INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)',
+        await pool.query(
+            'INSERT INTO messages (chat_id, role, content) VALUES ($1, $2, $3)',
             [currentChatId, 'user', message]
         );
 
@@ -190,15 +230,16 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
 
         if (!response.ok) {
             const error = await response.json();
-            return res.status(response.status).json({ error: error.error.message });
+            console.error('OpenAI Error:', error);
+            return res.status(response.status).json({ error: error.error?.message || 'OpenAI API error' });
         }
 
         const data = await response.json();
         const aiMessage = data.choices[0].message.content;
 
         // Save AI response
-        db.run(
-            'INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)',
+        await pool.query(
+            'INSERT INTO messages (chat_id, role, content) VALUES ($1, $2, $3)',
             [currentChatId, 'assistant', aiMessage]
         );
 
@@ -210,27 +251,31 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
 });
 
 // Get user chats
-app.get('/api/chats', authenticateToken, (req, res) => {
-    db.all(
-        'SELECT * FROM chats WHERE user_id = ? ORDER BY created_at DESC',
-        [req.user.id],
-        (err, chats) => {
-            if (err) return res.status(500).json({ error: 'Database error' });
-            res.json(chats);
-        }
-    );
+app.get('/api/chats', authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT * FROM chats WHERE user_id = $1 ORDER BY created_at DESC',
+            [req.user.id]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Get chats error:', error);
+        res.status(500).json({ error: 'Database error', details: error.message });
+    }
 });
 
 // Get chat messages
-app.get('/api/chats/:chatId', authenticateToken, (req, res) => {
-    db.all(
-        'SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at ASC',
-        [req.params.chatId],
-        (err, messages) => {
-            if (err) return res.status(500).json({ error: 'Database error' });
-            res.json(messages);
-        }
-    );
+app.get('/api/chats/:chatId', authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT * FROM messages WHERE chat_id = $1 ORDER BY created_at ASC',
+            [req.params.chatId]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Get messages error:', error);
+        res.status(500).json({ error: 'Database error', details: error.message });
+    }
 });
 
 // Serve static files AFTER API routes
@@ -247,7 +292,7 @@ app.use((req, res) => {
 
 // Error handler
 app.use((err, req, res, next) => {
-    console.error(err);
+    console.error('Server error:', err);
     res.status(500).json({ error: 'Internal server error', message: err.message });
 });
 
@@ -258,7 +303,7 @@ app.listen(PORT, () => {
 ║        Powered by Emmanuel            ║
 ╚══════════════════════════════════════╝
 Port: ${PORT}
-Database: Connected ✓
+Database: Neon PostgreSQL ✓
 OpenAI API: ${OPENAI_API_KEY ? 'Connected ✓' : 'Not configured ⚠'}
 URL: http://localhost:${PORT}
     `);
@@ -276,4 +321,5 @@ URL: http://localhost:${PORT}
 
 process.on('uncaughtException', (err) => {
     console.error('Uncaught Exception:', err);
+    process.exit(1);
 });
