@@ -1,0 +1,16 @@
+{
+  "name": "NUEL AI Chatbot",
+  "short_name": "NUEL AI",
+  "description": "AI-powered chatbot assistant",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4a6cf7",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzRhNmNmNyIgd2lkdGg9IjQ4cHgiIGhlaWdodD0iNDhweCI+PHBhdGggZD0iTTIxIDExLjVhOC41IDguNSAwIDAgMS04LjUgOC41SDguNWE4LjUgOC41IDAgMCAxLTguNS04LjV2LTFhOC41IDguNSAwIDAgMS04LjUtOC41aDRhOC41IDguNSAwIDAgMSA4LjUtOC41djF6Ii8+PC9zdmc+",
+      "sizes": "48x48",
+      "type": "image/svg+xml"
+    }
+  ]
+}

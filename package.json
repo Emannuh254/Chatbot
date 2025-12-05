@@ -1,35 +1,25 @@
 {
   "name": "nuel-ai-chatbot",
   "version": "1.0.0",
-  "description": "NUEL AI - Advanced Chat Application by Emmanuel Mutugi",
-  "type": "module",
+  "description": "AI-powered chatbot",
   "main": "server.js",
+  "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
-  "keywords": [
-    "ai",
-    "chat",
-    "gpt",
-    "nuel",
-    "bot"
-  ],
-  "author": "Emmanuel Mutugi",
-  "license": "MIT",
   "dependencies": {
-    "bcrypt": "^5.1.1",
-    "compression": "^1.8.1",
+    "express": "^4.18.2",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "express": "^4.18.2",
-    "express-rate-limit": "^8.2.1",
-    "groq-sdk": "^0.37.0",
+    "pg": "^8.11.3",
+    "bcrypt": "^5.1.1",
     "jsonwebtoken": "^9.0.2",
-    "node-fetch": "^2.7.0",
-    "pg": "^8.11.3"
+    "groq-sdk": "^0.3.0",
+    "compression": "^1.7.4",
+    "express-rate-limit": "^6.10.0"
   },
-  "engines": {
-    "node": ">=18.0.0"
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   }
 }

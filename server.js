@@ -22,6 +22,9 @@ const PORT = process.env.PORT || 3000;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
+// Add this line to trust proxy headers (fixes the X-Forwarded-For error)
+app.set('trust proxy', true);
+
 // Initialize Groq client
 const groq = new Groq({
   apiKey: GROQ_API_KEY,
@@ -58,6 +61,12 @@ if (isDevelopment) {
 pool.on('error', (err) => {
   console.error('❌ Unexpected error on idle client', err);
 });
+
+// Server load tracking
+let activeConnections = 0;
+let serverLoad = 0; // 0-100 scale
+const MAX_CONNECTIONS = 50;
+const HIGH_LOAD_THRESHOLD = 70;
 
 // Initialize database tables with optimized indexes
 async function initializeTables() {
@@ -139,15 +148,33 @@ await initializeTables();
 // Middleware for performance
 app.use(compression()); // Compress responses
 
-// Configure CORS more explicitly
+// Track active connections
+app.use((req, res, next) => {
+  activeConnections++;
+  
+  // Calculate server load based on active connections
+  serverLoad = Math.min(100, Math.round((activeConnections / MAX_CONNECTIONS) * 100));
+  
+  // Add server load to response headers
+  res.setHeader('X-Server-Load', serverLoad);
+  
+  res.on('finish', () => {
+    activeConnections--;
+  });
+  
+  next();
+});
+
+// Configure CORS for separate frontend hosting
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' 
-    ? (origin, callback) => {
-        // In production, you should specify allowed origins
-        // For now, we'll allow all origins with credentials
-        callback(null, true);
-      }
-    : true, // Allow all origins in development
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // In production, you should specify allowed origins
+    // For now, we'll allow all origins with credentials
+    return callback(null, true);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-User-ID'],
@@ -163,23 +190,66 @@ app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// Rate limiting to prevent abuse
+// Helper function to safely extract IP address
+function getClientIP(req) {
+  // Check for standard headers
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    // x-forwarded-for can contain multiple IPs, take the first one
+    return forwarded.split(',')[0].trim();
+  }
+  
+  // Check for other common headers
+  const realIP = req.headers['x-real-ip'] || 
+                 req.headers['x-client-ip'] || 
+                 req.headers['x-cluster-client-ip'] ||
+                 req.connection?.remoteAddress ||
+                 req.socket?.remoteAddress ||
+                 req.connection?.socket?.remoteAddress;
+  
+  if (realIP) {
+    return realIP;
+  }
+  
+  // Fallback to req.ip
+  return req.ip || 'unknown';
+}
+
+// Global rate limiter (safe IPv6)
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
   message: { error: 'Too many requests, please try again later' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Prefer authenticated user ID
+    if (req.headers['x-user-id']) {
+      return `user-${req.headers['x-user-id']}`;
+    }
+    // Use safe IP extraction
+    const ip = getClientIP(req);
+    return `ip-${ip}`;
+  },
+  skip: () => serverLoad > HIGH_LOAD_THRESHOLD,
 });
 app.use('/api/', limiter);
 
-// Specific rate limiting for profile endpoints
+// Profile limiter
 const profileLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 profile requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 20,
   message: { error: 'Too many profile attempts, please try again later' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => {
+    if (req.headers['x-user-id']) {
+      return `user-${req.headers['x-user-id']}`;
+    }
+    const ip = getClientIP(req);
+    return `ip-${ip}`;
+  },
+  skip: () => serverLoad > HIGH_LOAD_THRESHOLD,
 });
 
 // Cache for frequently accessed data with TTL
@@ -244,7 +314,30 @@ function validateUserId(userId) {
   return true;
 }
 
+// Middleware to check server load
+function checkServerLoad(req, res, next) {
+  if (serverLoad > HIGH_LOAD_THRESHOLD) {
+    return res.status(503).json({ 
+      error: 'SERVER_BUSY',
+      message: 'Server is currently experiencing high load. Please try again later.',
+      fallbackResponse: 'I apologize, but the server is currently experiencing high demand. Please try again in a moment.'
+    });
+  }
+  next();
+}
+
 // API Routes - All API routes should be defined before catch-all route
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    load: serverLoad,
+    activeConnections
+  });
+});
 
 // Create profile with rate limiting
 app.post('/api/profile/create', profileLimiter, async (req, res) => {
@@ -303,7 +396,7 @@ app.post('/api/profile/login', profileLimiter, async (req, res) => {
 });
 
 // Chat endpoint - works for both guests and authenticated users
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', checkServerLoad, async (req, res) => {
   try {
     const { message } = req.body;
 
@@ -519,76 +612,39 @@ app.delete('/api/chats/:chatId', async (req, res) => {
   }
 });
 
-// Static file serving - Serve files from public folder
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Service worker route - serve with correct MIME type
-app.get('/sw.js', (req, res) => {
-  res.setHeader('Content-Type', 'application/javascript');
-  res.sendFile(path.join(__dirname, 'public', 'sw.js'));
-});
-
-// Manifest route
-app.get('/manifest.json', (req, res) => {
-  res.setHeader('Content-Type', 'application/json');
-  res.sendFile(path.join(__dirname, 'public', 'manifest.json'));
-});
-
-// Catch-all route for SPA - Must be after API routes
-app.get('*', (req, res) => {
-  // Don't serve index.html for API routes, sw.js, or manifest.json
-  if (req.path.startsWith('/api/') || req.path === '/sw.js' || req.path === '/manifest.json') {
-    return res.status(404).json({ error: 'Endpoint not found' });
-  }
-  
-  // Serve index.html for all other routes
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
 // 404 handler - ensure JSON response for API routes
 app.use((req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: 'API endpoint not found' });
   }
-  res.status(404).send('Page not found');
+  
+  // For non-API routes, return a 404 since we're not serving the frontend
+  res.status(404).json({ error: 'Not found - this is an API server only' });
 });
 
-// Error handler - ensure JSON response for API routes
+// Global error handler (prevents crashes)
 app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  if (req.path.startsWith('/api/')) {
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-  res.status(500).send('Internal server error');
+  console.error('GLOBAL ERROR:', err);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
+// Start server
 app.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════╗
-║     🚀 NUEL AI Server Running 🚀      ║
+║     🚀 NUEL AI API Server Running 🚀   ║
 ║        Powered by Emmanuel            ║
 ╚══════════════════════════════════╝
 Port: ${PORT}
 Database: Neon PostgreSQL ✓
 Groq API: ${GROQ_API_KEY ? 'Connected ✓' : 'Not configured ⚠'}
-URL: http://localhost:${PORT}
+API URL: http://localhost:${PORT}/api
   `);
   
   // Only open browser in development mode
   if (isDevelopment) {
     setTimeout(() => {
-      console.log('Opening browser...');
-      try {
-        if (process.platform === 'win32') {
-          execSync(`start http://localhost:${PORT}`, { stdio: 'ignore' });
-        } else if (process.platform === 'darwin') {
-          execSync(`open http://localhost:${PORT}`, { stdio: 'ignore' });
-        } else {
-          execSync(`xdg-open http://localhost:${PORT}`, { stdio: 'ignore' });
-        }
-      } catch (error) {
-        console.log('Could not open browser automatically');
-      }
+      console.log('API server is ready for connections');
     }, 1000);
   }
 });
