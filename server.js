@@ -399,7 +399,7 @@ app.post('/api/profile/login', profileLimiter, async (req, res) => {
   }
 });
 
-// Chat endpoint
+// Chat endpoint - FIXED VERSION
 app.post('/api/chat', checkServerLoad, async (req, res) => {
   try {
     const { message } = req.body;
@@ -409,13 +409,16 @@ app.post('/api/chat', checkServerLoad, async (req, res) => {
       return res.status(400).json({ error: 'Message is required' });
     }
     
+    // Convert userId to number for database operations
+    const userIdNum = parseInt(userId, 10);
+    
     let currentChatId;
     const messageTitle = message.length > 50 ? message.substring(0, 50) + '...' : message;
 
     // Create a new chat for every message from a guest
-    if (userId === '1') {
+    if (userIdNum === 1) {
       const chatResult = await pool.query(
-        'INSERT INTO chats (user_id, title) VALUES (1, $1) RETURNING id',
+        'INSERT INTO chats (user_id, title) VALUES (1, $1) RETURNING id', // Fixed typo
         [`Guest Chat - ${new Date().toLocaleString()}`]
       );
       currentChatId = chatResult.rows[0].id;
@@ -423,14 +426,14 @@ app.post('/api/chat', checkServerLoad, async (req, res) => {
       // For authenticated users, find the latest chat or create a new one
       const latestChatResult = await pool.query(
         'SELECT id FROM chats WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
-        [userId]
+        [userIdNum] // Use numeric ID
       );
       if (latestChatResult.rows.length > 0) {
         currentChatId = latestChatResult.rows[0].id;
       } else {
         const newChatResult = await pool.query(
           'INSERT INTO chats (user_id, title) VALUES ($1, $2) RETURNING id',
-          [userId, messageTitle]
+          [userIdNum, messageTitle] // Use numeric ID
         );
         currentChatId = newChatResult.rows[0].id;
       }
@@ -473,7 +476,7 @@ app.post('/api/chat', checkServerLoad, async (req, res) => {
     res.json({ 
       response: aiMessage, 
       chatId: currentChatId,
-      isGuest: userId === '1'
+      isGuest: userIdNum === 1 // Use numeric ID for comparison
     });
   } catch (error) {
     console.error('Chat endpoint error:', error);
@@ -481,18 +484,18 @@ app.post('/api/chat', checkServerLoad, async (req, res) => {
   }
 });
 
-// Get user chats
+// Get user chats - FIXED VERSION
 app.get('/api/chats', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'];
     
-    if (!userId || userId === '1') {
+    if (!userId || parseInt(userId, 10) === 1) { // Use parseInt for comparison
       return res.status(401).json({ error: 'Authentication required' });
     }
 
     const result = await pool.query(
       'SELECT * FROM chats WHERE user_id = $1 ORDER BY created_at DESC',
-      [userId]
+      [parseInt(userId, 10)] // Convert to number
     );
     
     res.json(result.rows);
@@ -502,20 +505,20 @@ app.get('/api/chats', async (req, res) => {
   }
 });
 
-// Get chat messages
+// Get chat messages - FIXED VERSION
 app.get('/api/chats/:chatId', async (req, res) => {
   try {
     const { chatId } = req.params;
     const userId = req.headers['x-user-id'];
     
-    if (!userId || userId === '1') {
+    if (!userId || parseInt(userId, 10) === 1) { // Use parseInt for comparison
       return res.status(401).json({ error: 'Authentication required' });
     }
     
     // Verify that chat belongs to user
     const chatCheck = await pool.query(
       'SELECT * FROM chats WHERE id = $1 AND user_id = $2',
-      [chatId, userId]
+      [parseInt(chatId, 10), parseInt(userId, 10)] // Convert both to numbers
     );
     
     if (chatCheck.rows.length === 0) {
@@ -524,7 +527,7 @@ app.get('/api/chats/:chatId', async (req, res) => {
 
     const result = await pool.query(
       'SELECT * FROM messages WHERE chat_id = $1 ORDER BY created_at ASC',
-      [chatId]
+      [parseInt(chatId, 10)] // Convert to number
     );
     
     res.json(result.rows);
@@ -534,20 +537,20 @@ app.get('/api/chats/:chatId', async (req, res) => {
   }
 });
 
-// Delete chat
+// Delete chat - FIXED VERSION
 app.delete('/api/chats/:chatId', async (req, res) => {
   try {
     const { chatId } = req.params;
     const userId = req.headers['x-user-id'];
     
-    if (!userId || userId === '1') {
+    if (!userId || parseInt(userId, 10) === 1) { // Use parseInt for comparison
       return res.status(401).json({ error: 'Authentication required' });
     }
     
     // Verify that chat belongs to user
     const chatCheck = await pool.query(
       'SELECT * FROM chats WHERE id = $1 AND user_id = $2',
-      [chatId, userId]
+      [parseInt(chatId, 10), parseInt(userId, 10)] // Convert both to numbers
     );
     
     if (chatCheck.rows.length === 0) {
@@ -555,7 +558,7 @@ app.delete('/api/chats/:chatId', async (req, res) => {
     }
     
     // Delete chat (messages will be deleted due to CASCADE)
-    await pool.query('DELETE FROM chats WHERE id = $1', [chatId]);
+    await pool.query('DELETE FROM chats WHERE id = $1', [parseInt(chatId, 10)]); // Convert to number
     
     res.json({ success: true, message: 'Chat deleted successfully' });
   } catch (error) {
