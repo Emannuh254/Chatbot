@@ -399,7 +399,7 @@ app.post('/api/profile/login', profileLimiter, async (req, res) => {
   }
 });
 
-// Chat endpoint - FIXED VERSION
+// Chat endpoint - FULLY FIXED VERSION
 app.post('/api/chat', checkServerLoad, async (req, res) => {
   try {
     const { message } = req.body;
@@ -409,8 +409,16 @@ app.post('/api/chat', checkServerLoad, async (req, res) => {
       return res.status(400).json({ error: 'Message is required' });
     }
     
-    // Convert userId to number for database operations
-    const userIdNum = parseInt(userId, 10);
+    // Convert userId to number for database operations with fallback to guest
+    let userIdNum = 1; // Default to guest
+    if (userId && userId !== 'undefined' && userId !== 'null') {
+      userIdNum = parseInt(userId, 10);
+      // If parsing fails, keep guest as default
+      if (isNaN(userIdNum)) {
+        userIdNum = 1;
+        console.warn('Invalid user ID provided, defaulting to guest:', userId);
+      }
+    }
     
     let currentChatId;
     const messageTitle = message.length > 50 ? message.substring(0, 50) + '...' : message;
@@ -584,10 +592,10 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`
-╔══════════════════════════════════════╗
+╔════════════════════════════════════╗
 ║     🚀 NUEL AI API Server Running 🚀   ║
 ║        Powered by Emmanuel            ║
-╚══════════════════════════════════════╝
+╚════════════════════════════════════╝
 Port: ${PORT}
 Database: Neon PostgreSQL ✓
 Groq API: ${GROQ_API_KEY ? 'Connected ✓' : 'Not configured ⚠'}
